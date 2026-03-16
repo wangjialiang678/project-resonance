@@ -59,10 +59,6 @@ export default function AppRoutes() {
     speak: stepfunSpeak,
     stop: stepfunStop,
     isSpeaking: stepfunIsSpeaking,
-    cloneVoice,
-    isCloning,
-    voiceId,
-    setVoiceId,
     error: ttsError,
   } = useStepfunTTS();
 
@@ -102,11 +98,7 @@ export default function AppRoutes() {
               onSpeak={stepfunSpeak}
               onStop={stepfunStop}
               isSpeaking={stepfunIsSpeaking}
-              voiceId={voiceId}
-              isCloning={isCloning}
               ttsError={ttsError}
-              onCloneVoice={cloneVoice}
-              onClearVoice={() => setVoiceId(null)}
             />
           }
         />
