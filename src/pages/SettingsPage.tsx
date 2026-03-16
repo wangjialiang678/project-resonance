@@ -4,14 +4,35 @@ import { useTTS } from '@/hooks/useTTS';
 import AccessibilitySettings from '@/components/AccessibilitySettings';
 import AccessibleStepper from '@/components/AccessibleStepper';
 import ASRSettingsPanel from '@/components/ASRSettingsPanel';
+import VoiceClonePanel from '@/components/VoiceClonePanel';
 import { List, Mic, ChevronRight } from 'lucide-react';
 
 interface SettingsPageProps {
   settings: AppSettings;
   onUpdate: (settings: AppSettings) => void;
+  // 克隆相关
+  voiceId: string | null;
+  isCloning: boolean;
+  ttsError: string | null;
+  onCloneVoice: (audioBlob: Blob, referenceText?: string) => Promise<string | null>;
+  onSpeak: (text: string) => Promise<void>;
+  onStop: () => void;
+  isSpeaking: boolean;
+  onClearVoice: () => void;
 }
 
-export default function SettingsPage({ settings, onUpdate }: SettingsPageProps) {
+export default function SettingsPage({
+  settings,
+  onUpdate,
+  voiceId,
+  isCloning,
+  ttsError,
+  onCloneVoice,
+  onSpeak,
+  onStop,
+  isSpeaking,
+  onClearVoice,
+}: SettingsPageProps) {
   const { voices, hasChineseVoice } = useTTS();
   const navigate = useNavigate();
 
@@ -162,6 +183,18 @@ export default function SettingsPage({ settings, onUpdate }: SettingsPageProps) 
           </div>
         )}
       </div>
+
+      {/* Voice Clone Panel */}
+      <VoiceClonePanel
+        voiceId={voiceId}
+        isCloning={isCloning}
+        error={ttsError}
+        onClone={onCloneVoice}
+        onSpeak={onSpeak}
+        onClearVoice={onClearVoice}
+        isSpeaking={isSpeaking}
+        onStop={onStop}
+      />
 
       {/* Reset */}
       <button

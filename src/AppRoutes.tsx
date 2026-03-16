@@ -102,11 +102,7 @@ export default function AppRoutes() {
               onSpeak={stepfunSpeak}
               onStop={stepfunStop}
               isSpeaking={stepfunIsSpeaking}
-              voiceId={voiceId}
-              isCloning={isCloning}
               ttsError={ttsError}
-              onCloneVoice={cloneVoice}
-              onClearVoice={() => setVoiceId(null)}
             />
           }
         />
@@ -136,7 +132,18 @@ export default function AppRoutes() {
         <Route
           path="/settings"
           element={
-            <SettingsPage settings={settings} onUpdate={setSettings} />
+            <SettingsPage
+              settings={settings}
+              onUpdate={setSettings}
+              voiceId={voiceId}
+              isCloning={isCloning}
+              ttsError={ttsError}
+              onCloneVoice={cloneVoice}
+              onSpeak={stepfunSpeak}
+              onStop={stepfunStop}
+              isSpeaking={stepfunIsSpeaking}
+              onClearVoice={() => setVoiceId(null)}
+            />
           }
         />
         

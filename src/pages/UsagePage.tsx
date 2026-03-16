@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Mic, RotateCcw, Check, X } from 'lucide-react';
+import { Mic, RotateCcw } from 'lucide-react';
 import { useAudioRecorder } from '@/hooks/useAudioRecorder';
 import { useStepfunASR } from '@/hooks/useStepfunASR';
 import { useWechatBridge, getWechatDebugInfo } from '@/hooks/useWechatBridge';
@@ -9,30 +9,21 @@ import ASRStreamingResult from '@/components/ASRStreamingResult';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { useAccessibility } from '@/hooks/useAccessibility';
 import { toast } from 'sonner';
-import type { ASRSettings } from '@/types';
 
 interface UsagePageProps {
-  onSpeak: (text: string, overrideVoice?: string) => Promise<void>;
+  onSpeak: (text: string) => Promise<void>;
   onStop: () => void;
   isSpeaking: boolean;
-  voiceId: string | null;
-  isCloning: boolean;
   ttsError: string | null;
-  onCloneVoice: (audioBlob: Blob, referenceText?: string) => Promise<string | null>;
-  onClearVoice: () => void;
 }
 
-type FlowState = 'idle' | 'recording' | 'processing' | 'cloning' | 'speaking' | 'result';
+type FlowState = 'idle' | 'recording' | 'processing' | 'speaking' | 'result';
 
 export default function UsagePage({
   onSpeak,
   onStop,
   isSpeaking,
-  voiceId,
-  isCloning,
   ttsError,
-  onCloneVoice,
-  onClearVoice,
 }: UsagePageProps) {
   const { isRecording, duration, startRecording, stopRecording, error: recError, audioLevel } = useAudioRecorder();
   const [flowState, setFlowState] = useState<FlowState>('idle');
@@ -83,24 +74,13 @@ export default function UsagePage({
     // Immediately show processing state for instant feedback
     setFlowState('processing');
 
-    // Skip CPU-heavy WAV conversion when voice is already cloned
-    const result = await stopRecording({ includeWav: !voiceId });
+    const result = await stopRecording({ includeWav: false });
     if (!result) {
       setFlowState('idle');
       return;
     }
 
-    const { webmBlob, blob: wavBlob, duration: recDuration } = result;
-
-    // Voice cloning is non-blocking: do it in background, never delay ASR -> TTS
-    const shouldClone = !voiceId && recDuration >= 10;
-    if (shouldClone) {
-      void onCloneVoice(wavBlob)
-        .then((vid) => {
-          if (vid) toast.success('音色克隆成功');
-        })
-        .catch(() => null);
-    }
+    const { webmBlob } = result;
 
     const text = await transcribe(webmBlob);
 
@@ -120,7 +100,7 @@ export default function UsagePage({
     }
 
     setFlowState('result');
-  }, [stopRecording, voiceId, onCloneVoice, transcribe, onSpeak]);
+  }, [stopRecording, transcribe, onSpeak]);
 
   const handleReset = useCallback(() => {
     setFlowState('idle');
@@ -161,7 +141,7 @@ export default function UsagePage({
         handler: () => {
           const text = finalText || lastTranscript;
           if (text) {
-            isSpeaking ? onStop() : onSpeak(text);
+            if (isSpeaking) { onStop(); } else { void onSpeak(text); }
           }
         },
         enabled: flowState === 'result' && !!(finalText || lastTranscript),
@@ -219,30 +199,8 @@ export default function UsagePage({
             <span className="text-muted-foreground/40">→</span>
             <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary">识别</span>
             <span className="text-muted-foreground/40">→</span>
-            <span className="inline-flex items-center gap-1 rounded-full bg-accent/10 px-2.5 py-0.5 text-xs font-medium text-accent">克隆</span>
-            <span className="text-muted-foreground/40">→</span>
             <span className="inline-flex items-center gap-1 rounded-full bg-success/10 px-2.5 py-0.5 text-xs font-medium text-success">朗读</span>
           </div>
-          {voiceId && (
-            <motion.span
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-success/15 to-success/5 border border-success/20 px-3 py-1 text-xs font-medium text-success"
-            >
-              <Check className="h-3.5 w-3.5" />
-              音色已克隆
-              <button
-                onClick={() => {
-                  onClearVoice();
-                  toast.info('已清除克隆音色，下次录音将重新克隆');
-                }}
-                className="ml-0.5 rounded-full p-0.5 text-success/60 hover:text-destructive hover:bg-destructive/10 transition-colors"
-                aria-label="清除克隆音色"
-              >
-                <X className="h-3 w-3" />
-              </button>
-            </motion.span>
-          )}
         </motion.div>
       </div>
 
@@ -257,7 +215,6 @@ export default function UsagePage({
           <span>按</span>
           <kbd className="kbd-hint">空格</kbd>
           <span>开始录音</span>
-          {!voiceId && <span className="text-muted-foreground/50">（≥10s 自动克隆音色）</span>}
         </motion.div>
       )}
 
@@ -282,28 +239,12 @@ export default function UsagePage({
               onStop={handleStop}
               size="lg"
             />
-            {isRecording && !voiceId && (
-              <motion.p
-                initial={{ opacity: 0, y: 5 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="mt-3 text-xs text-muted-foreground"
-              >
-                {duration >= 10 ? (
-                  <span className="inline-flex items-center gap-1 text-success font-medium">
-                    <Check className="h-3 w-3" />
-                    已满 10 秒，可克隆音色
-                  </span>
-                ) : (
-                  <span className="tabular-nums">已录 {duration}s / 10s（克隆音色需 10 秒）</span>
-                )}
-              </motion.p>
-            )}
           </div>
         </motion.div>
       )}
 
-      {/* Processing / Cloning / Speaking states */}
-      {(flowState === 'processing' || flowState === 'cloning' || flowState === 'speaking') && (
+      {/* Processing / Speaking states */}
+      {(flowState === 'processing' || flowState === 'speaking') && (
         <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
@@ -320,7 +261,6 @@ export default function UsagePage({
           </div>
           <p className="relative text-foreground font-semibold">
             {flowState === 'processing' && '正在识别语音...'}
-            {flowState === 'cloning' && '正在克隆音色...'}
             {flowState === 'speaking' && '正在朗读...'}
           </p>
           {flowState === 'processing' && (
