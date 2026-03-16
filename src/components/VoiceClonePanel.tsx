@@ -26,7 +26,6 @@ export default function VoiceClonePanel({
   onStop,
 }: VoiceClonePanelProps) {
   const { isRecording, duration, startRecording, stopRecording, audioLevel } = useAudioRecorder();
-  const [referenceText, setReferenceText] = useState('');
   const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
   const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -69,13 +68,13 @@ export default function VoiceClonePanel({
 
   const handleClone = useCallback(async () => {
     if (!recordedBlob) return;
-    const vid = await onClone(recordedBlob, referenceText || undefined);
+    const vid = await onClone(recordedBlob, '今天天气真不错，我想出去走走');
     if (vid) {
-      toast.success('音色复刻成功！');
+      toast.success('声音克隆成功！');
       setRecordedBlob(null);
       setUploadedFileName(null);
     }
-  }, [recordedBlob, referenceText, onClone]);
+  }, [recordedBlob, onClone]);
 
   const handleTest = useCallback(async () => {
     if (isSpeaking) {
@@ -95,7 +94,7 @@ export default function VoiceClonePanel({
               <Check className="h-4 w-4 text-success" />
             </div>
             <div>
-              <h3 className="font-semibold text-foreground text-sm">音色已克隆</h3>
+              <h3 className="font-semibold text-foreground text-sm">声音已克隆</h3>
               <p className="text-xs text-muted-foreground truncate max-w-[180px]">
                 ID: {voiceId}
               </p>
@@ -127,25 +126,13 @@ export default function VoiceClonePanel({
   return (
     <div className="rounded-xl border border-border bg-card p-5 space-y-4">
       <div>
-        <h3 className="font-semibold text-foreground">音色克隆</h3>
+        <h3 className="font-semibold text-foreground">声音克隆</h3>
         <p className="text-xs text-muted-foreground mt-1">
-          录制或上传 5～15 秒清晰参考语音，系统将复刻您的音色
+          朗读下面这句话，系统将学习你的声音
         </p>
-      </div>
-
-      {/* Reference text input */}
-      <div>
-        <label className="text-xs font-medium text-muted-foreground" htmlFor="ref-text">
-          参考文本（可选，提升克隆质量）
-        </label>
-        <input
-          id="ref-text"
-          type="text"
-          value={referenceText}
-          onChange={(e) => setReferenceText(e.target.value)}
-          placeholder="输入您将朗读的文字..."
-          className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
-        />
+        <p className="mt-2 rounded-lg bg-muted/50 px-3 py-2 text-sm text-foreground italic text-center">
+          「今天天气真不错，我想出去走走」
+        </p>
       </div>
 
       {/* Recording + Upload buttons */}
@@ -213,7 +200,7 @@ export default function VoiceClonePanel({
       {isRecording && (
         <p className="text-sm text-muted-foreground text-center">
           录音中... {duration.toFixed(1)}s
-          <span className="text-xs ml-1">（至少 10 秒）</span>
+          <span className="text-xs ml-1">（至少 5 秒）</span>
         </p>
       )}
 

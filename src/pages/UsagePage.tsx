@@ -15,6 +15,10 @@ interface UsagePageProps {
   onStop: () => void;
   isSpeaking: boolean;
   ttsError: string | null;
+  voiceId: string | null;
+  isCloning: boolean;
+  onCloneVoice: (audioBlob: Blob) => Promise<string | null>;
+  onClearVoice: () => void;
 }
 
 type FlowState = 'idle' | 'recording' | 'processing' | 'speaking' | 'result';
@@ -24,6 +28,10 @@ export default function UsagePage({
   onStop,
   isSpeaking,
   ttsError,
+  voiceId,
+  isCloning,
+  onCloneVoice,
+  onClearVoice,
 }: UsagePageProps) {
   const { isRecording, duration, startRecording, stopRecording, error: recError, audioLevel } = useAudioRecorder();
   const [flowState, setFlowState] = useState<FlowState>('idle');
@@ -74,13 +82,30 @@ export default function UsagePage({
     // Immediately show processing state for instant feedback
     setFlowState('processing');
 
-    const result = await stopRecording({ includeWav: false });
+    // Only convert to WAV when we need to clone (no voiceId yet, recording might be long enough)
+    const needClone = !voiceId;
+    const result = await stopRecording({ includeWav: needClone });
     if (!result) {
       setFlowState('idle');
       return;
     }
 
-    const { webmBlob } = result;
+    const { webmBlob, wavBlob, duration: recDuration } = result;
+
+    // Silent background clone: first recording ≥ 5s triggers clone without blocking
+    if (needClone && recDuration >= 5 && wavBlob) {
+      console.log('[UsagePage] Triggering silent voice clone, duration:', recDuration.toFixed(1), 's');
+      void onCloneVoice(wavBlob).then((vid) => {
+        if (vid) {
+          console.log('[UsagePage] Voice clone succeeded, voiceId:', vid);
+          toast.success('已学习你的音色，下次将用你的声音朗读');
+        }
+      }).catch((err) => {
+        console.warn('[UsagePage] Silent clone failed:', err);
+      });
+    } else if (needClone) {
+      console.log('[UsagePage] Clone skipped: duration', recDuration.toFixed(1), 's (need ≥5s)');
+    }
 
     const text = await transcribe(webmBlob);
 
@@ -100,7 +125,7 @@ export default function UsagePage({
     }
 
     setFlowState('result');
-  }, [stopRecording, transcribe, onSpeak]);
+  }, [stopRecording, transcribe, onSpeak, voiceId, onCloneVoice]);
 
   const handleReset = useCallback(() => {
     setFlowState('idle');
@@ -216,6 +241,37 @@ export default function UsagePage({
           <kbd className="kbd-hint">空格</kbd>
           <span>开始录音</span>
         </motion.div>
+      )}
+
+      {/* First-time voice clone hint */}
+      {!voiceId && !isCloning && flowState === 'idle' && (
+        <div className="text-center text-xs text-muted-foreground bg-primary/5 rounded-lg px-3 py-2">
+          首次录音将自动学习你的声音（需说 5 秒以上）
+        </div>
+      )}
+
+      {/* Cloning in progress indicator */}
+      {isCloning && (
+        <div className="flex items-center justify-center gap-2 text-xs text-primary bg-primary/5 rounded-lg px-3 py-2">
+          <div className="h-3 w-3 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+          正在学习你的声音...
+        </div>
+      )}
+
+      {/* Voice cloned indicator + switch person */}
+      {voiceId && !isCloning && flowState === 'idle' && (
+        <div className="flex items-center justify-center gap-3 text-xs">
+          <span className="flex items-center gap-1.5 text-success">
+            <span className="h-1.5 w-1.5 rounded-full bg-success" />
+            已使用你的声音
+          </span>
+          <button
+            onClick={() => { onClearVoice(); toast.info('已切换，下次录音将重新学习声音'); }}
+            className="text-muted-foreground hover:text-primary transition-colors underline underline-offset-2"
+          >
+            换人
+          </button>
+        </div>
       )}
 
       {/* Recording Area */}

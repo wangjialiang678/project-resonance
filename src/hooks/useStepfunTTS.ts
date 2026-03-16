@@ -202,13 +202,20 @@ export function useStepfunTTS(): UseStepfunTTSReturn {
         formData.append('text', referenceText);
       }
 
+      // 60s timeout to prevent infinite spinner (clone involves upload + API call)
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 60000);
+
       const response = await fetch(`${supabaseUrl}/functions/v1/stepfun-voice-clone`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
         },
         body: formData,
+        signal: controller.signal,
       });
+
+      clearTimeout(timeout);
 
       if (!response.ok) {
         const errData = await response.json().catch(() => ({}));
@@ -220,16 +227,18 @@ export function useStepfunTTS(): UseStepfunTTSReturn {
 
       if (newVoiceId) {
         setVoiceId(newVoiceId);
-        setIsCloning(false);
         return newVoiceId;
       } else {
         throw new Error('未获取到音色 ID');
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : '音色复刻失败';
+      const message = err instanceof Error
+        ? (err.name === 'AbortError' ? '声音克隆超时，请重试' : err.message)
+        : '音色复刻失败';
       setError(message);
-      setIsCloning(false);
       return null;
+    } finally {
+      setIsCloning(false);
     }
   }, [setVoiceId]);
 

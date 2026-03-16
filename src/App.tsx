@@ -16,9 +16,11 @@ const ResetPasswordPage = lazy(() => import("./pages/ResetPasswordPage"));
 const queryClient = new QueryClient();
 
 function AuthenticatedApp() {
+  // Auth preserved but bypassed for demo — remove `VITE_SKIP_AUTH` check to re-enable
+  const skipAuth = import.meta.env.VITE_SKIP_AUTH !== 'false';
   const { user, loading } = useAuth();
 
-  if (loading) {
+  if (!skipAuth && loading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-background">
         <div className="text-muted-foreground text-sm">加载中...</div>
@@ -26,12 +28,14 @@ function AuthenticatedApp() {
     );
   }
 
+  const showAuth = !skipAuth && !user;
+
   return (
     <BrowserRouter>
       <Suspense fallback={<div className="flex items-center justify-center h-screen">加载中...</div>}>
         <Routes>
           <Route path="/reset-password" element={<ResetPasswordPage />} />
-          {!user ? (
+          {showAuth ? (
             <Route path="*" element={<AuthPage />} />
           ) : (
             <Route

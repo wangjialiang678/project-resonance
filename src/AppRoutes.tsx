@@ -103,6 +103,10 @@ export default function AppRoutes() {
               onStop={stepfunStop}
               isSpeaking={stepfunIsSpeaking}
               ttsError={ttsError}
+              voiceId={voiceId}
+              isCloning={isCloning}
+              onCloneVoice={cloneVoice}
+              onClearVoice={() => setVoiceId(null)}
             />
           }
         />
