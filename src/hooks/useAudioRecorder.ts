@@ -4,9 +4,9 @@ interface RecordingResult {
   /** Compressed webm blob — small, ideal for ASR upload */
   webmBlob: Blob;
   /** PCM WAV blob — needed by voice-cloning APIs */
-  wavBlob: Blob;
+  wavBlob?: Blob;
   /** Alias for wavBlob (backward compat) */
-  blob: Blob;
+  blob?: Blob;
   duration: number;
 }
 
@@ -174,13 +174,12 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
           setError('录音时间太短，请重试');
           resolve(null);
         } else {
-          let wavBlob: Blob = webmBlob;
+          let wavBlob: Blob | undefined;
           if (includeWav) {
             try {
               wavBlob = await convertToWav(webmBlob);
             } catch (e) {
-              console.warn('WAV conversion failed, using webm as fallback:', e);
-              wavBlob = webmBlob;
+              console.warn('WAV conversion failed:', e);
             }
           }
           resolve({ webmBlob, wavBlob, blob: wavBlob, duration: finalDuration });

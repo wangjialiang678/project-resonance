@@ -27,11 +27,13 @@ export default function VoiceClonePanel({
 }: VoiceClonePanelProps) {
   const { isRecording, duration, startRecording, stopRecording, audioLevel } = useAudioRecorder();
   const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
+  const [recordedDuration, setRecordedDuration] = useState<number | null>(null);
   const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleStartRecording = useCallback(async () => {
     setRecordedBlob(null);
+    setRecordedDuration(null);
     setUploadedFileName(null);
     await startRecording();
   }, [startRecording]);
@@ -40,6 +42,7 @@ export default function VoiceClonePanel({
     const result = await stopRecording();
     if (result?.blob) {
       setRecordedBlob(result.blob);
+      setRecordedDuration(result.duration);
     }
   }, [stopRecording]);
 
@@ -59,6 +62,7 @@ export default function VoiceClonePanel({
     }
 
     setRecordedBlob(file);
+    setRecordedDuration(null);
     setUploadedFileName(file.name);
     toast.success(`已选择: ${file.name}`);
 
@@ -68,13 +72,18 @@ export default function VoiceClonePanel({
 
   const handleClone = useCallback(async () => {
     if (!recordedBlob) return;
+    if (recordedDuration !== null && recordedDuration < 5) {
+      toast.error('录音至少需要 5 秒，请重新录制');
+      return;
+    }
     const vid = await onClone(recordedBlob, '今天天气真不错，我想出去走走');
     if (vid) {
       toast.success('声音克隆成功！');
       setRecordedBlob(null);
+      setRecordedDuration(null);
       setUploadedFileName(null);
     }
-  }, [recordedBlob, onClone]);
+  }, [recordedBlob, recordedDuration, onClone]);
 
   const handleTest = useCallback(async () => {
     if (isSpeaking) {

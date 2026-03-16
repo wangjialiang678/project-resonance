@@ -84,27 +84,41 @@ export default function UsagePage({
 
     // Only convert to WAV when we need to clone (no voiceId yet, recording might be long enough)
     const needClone = !voiceId;
+    console.log('[handleStop] START — voiceId:', voiceId, 'needClone:', needClone);
     const result = await stopRecording({ includeWav: needClone });
     if (!result) {
+      console.log('[handleStop] stopRecording returned null');
       setFlowState('idle');
       return;
     }
 
     const { webmBlob, wavBlob, duration: recDuration } = result;
+    console.log(
+      '[handleStop] recording result — duration:',
+      recDuration.toFixed(1),
+      's, webmBlob:',
+      webmBlob.size,
+      'B, wavBlob:',
+      wavBlob?.size ?? 0,
+      'B, wavType:',
+      wavBlob?.type ?? '(none)'
+    );
 
     // Silent background clone: first recording ≥ 5s triggers clone without blocking
     if (needClone && recDuration >= 5 && wavBlob) {
-      console.log('[UsagePage] Triggering silent voice clone, duration:', recDuration.toFixed(1), 's');
+      console.log('[handleStop] CLONE triggered — sending', wavBlob.size, 'bytes to cloneVoice');
       void onCloneVoice(wavBlob).then((vid) => {
         if (vid) {
-          console.log('[UsagePage] Voice clone succeeded, voiceId:', vid);
+          console.log('[handleStop] CLONE SUCCESS — voiceId:', vid);
           toast.success('已学习你的音色，下次将用你的声音朗读');
+        } else {
+          console.warn('[handleStop] CLONE returned null (failed silently)');
         }
       }).catch((err) => {
-        console.warn('[UsagePage] Silent clone failed:', err);
+        console.error('[handleStop] CLONE ERROR:', err);
       });
-    } else if (needClone) {
-      console.log('[UsagePage] Clone skipped: duration', recDuration.toFixed(1), 's (need ≥5s)');
+    } else {
+      console.log('[handleStop] clone skipped — needClone:', needClone, 'duration:', recDuration.toFixed(1), 's, wavBlob:', !!wavBlob);
     }
 
     const text = await transcribe(webmBlob);

@@ -189,6 +189,7 @@ export function useStepfunTTS(): UseStepfunTTSReturn {
   }, []);
 
   const cloneVoice = useCallback(async (audioBlob: Blob, referenceText?: string): Promise<string | null> => {
+    console.log('[cloneVoice] START — blob size:', audioBlob.size, 'type:', audioBlob.type, 'refText:', referenceText || '(none)');
     setError(null);
     setIsCloning(true);
 
@@ -206,38 +207,48 @@ export function useStepfunTTS(): UseStepfunTTSReturn {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 60000);
 
-      const response = await fetch(`${supabaseUrl}/functions/v1/stepfun-voice-clone`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-        },
-        body: formData,
-        signal: controller.signal,
-      });
+      console.log('[cloneVoice] fetching', supabaseUrl + '/functions/v1/stepfun-voice-clone');
+      try {
+        const response = await fetch(`${supabaseUrl}/functions/v1/stepfun-voice-clone`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+          },
+          body: formData,
+          signal: controller.signal,
+        });
 
-      clearTimeout(timeout);
+        console.log('[cloneVoice] response status:', response.status);
 
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        throw new Error(errData.error || `音色复刻失败 (${response.status})`);
-      }
+        if (!response.ok) {
+          const errData = await response.json().catch(() => ({}));
+          console.error('[cloneVoice] API error:', JSON.stringify(errData));
+          throw new Error(errData.error || `音色复刻失败 (${response.status})`);
+        }
 
-      const data = await response.json();
-      const newVoiceId = data.voice_id;
+        const data = await response.json();
+        console.log('[cloneVoice] API response:', JSON.stringify(data));
+        const newVoiceId = data.voice_id;
 
-      if (newVoiceId) {
-        setVoiceId(newVoiceId);
-        return newVoiceId;
-      } else {
+        if (newVoiceId) {
+          setVoiceId(newVoiceId);
+          console.log('[cloneVoice] SUCCESS — voiceId:', newVoiceId);
+          return newVoiceId;
+        }
+
         throw new Error('未获取到音色 ID');
+      } finally {
+        clearTimeout(timeout);
       }
     } catch (err) {
       const message = err instanceof Error
         ? (err.name === 'AbortError' ? '声音克隆超时，请重试' : err.message)
         : '音色复刻失败';
+      console.error('[cloneVoice] CATCH:', message, err);
       setError(message);
       return null;
     } finally {
+      console.log('[cloneVoice] FINALLY — isCloning set to false');
       setIsCloning(false);
     }
   }, [setVoiceId]);
