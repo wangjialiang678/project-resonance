@@ -1,6 +1,6 @@
 # 设计文档：首次克隆等待与 UX 优化 v2d
 
-> 版本：v2d | 日期：2026-03-17 | 状态：待实现
+> 版本：v2d | 日期：2026-03-17 | 状态：已实现并测试通过
 
 ## 一、设计目标
 
@@ -166,11 +166,48 @@ function truncateWav(wavBlob: Blob, maxSeconds: number): Promise<Blob> {
 | `src/utils/audioUtils.ts` | **新建** — truncateWav 工具函数 |
 | `src/pages/UsagePage.tsx` | 首次录音等待克隆逻辑、FlowState 扩展、<5s 提示 |
 | `src/pages/SettingsPage.tsx` | 快捷链接改为"声音克隆"、滚动到锚点 |
-| `src/components/VoiceClonePanel.tsx` | 已克隆状态合并布局、去掉 Voice ID 显示 |
+| `src/components/VoiceClonePanel.tsx` | 已克隆状态合并布局、去掉 Voice ID 显示、清除前停止播放 |
+| `src/hooks/useStepfunASR.ts` | 新增直连模式（VITE_STEPFUN_API_KEY） |
+| `src/hooks/useStepfunTTS.ts` | 新增直连模式（VITE_STEPFUN_API_KEY），speak + cloneVoice 双路径 |
 
 ---
 
-## 七、容错矩阵
+## 七、本地开发直连模式
+
+为解决团队成员无 Supabase Dashboard 权限时的本地测试问题，hooks 新增 **直连模式**：
+
+```bash
+# .env.local（不提交到 git）
+VITE_STEPFUN_API_KEY=your-stepfun-api-key
+```
+
+**工作原理**：当 `VITE_STEPFUN_API_KEY` 存在时，`useStepfunASR` / `useStepfunTTS` 直接调用 StepFun API，跳过 Supabase Edge Function 代理层。不存在时走原有 Supabase 代理路径，无需改动。
+
+**注意**：直连模式仅用于本地开发测试。生产环境必须走 Supabase Edge Function（隐藏 API Key）。
+
+---
+
+## 八、已修复的关键 Bug
+
+### 8.1 voiceId 闭包问题（Critical）
+`handleStop` 中 `cloneVoice` 成功后 `setVoiceId(newId)` 更新了 state，但同一 render 内 `onSpeak` 的闭包仍捕获旧的 `voiceId=null`。
+**修复**：`onSpeak(text, overrideVoice?)` 接受可选参数，克隆成功后显式传入 `onSpeak(text, clonedVid)`。
+
+### 8.2 Promise.race 超时泄漏（Warning）
+`Promise.race([clonePromise, timeoutPromise])` 中，如果克隆先完成，`setTimeout` 仍在运行。
+**修复**：保存 `timeoutId`，race 结束后 `clearTimeout(timeoutId!)`。
+
+### 8.3 VoiceClonePanel 清除不停播放（Warning）
+用户点击"清除"时，如果克隆声音正在播放，不会停止。
+**修复**：`onClick` 中先 `if (isSpeaking) onStop()` 再 `onClearVoice()`。
+
+### 8.4 truncateWav 非 WAV 输入（Warning）
+非 WAV 格式或损坏的 blob 传入 `truncateWav` 会导致异常。
+**修复**：校验 RIFF/WAVE 魔数和 sampleRate/channels/bitsPerSample 非零，无效输入返回原 blob。
+
+---
+
+## 九、容错矩阵
 
 | 场景 | 处理 | 用户感知 |
 |------|------|---------|
@@ -181,3 +218,33 @@ function truncateWav(wavBlob: Blob, maxSeconds: number): Promise<Blob> {
 | 首次 ≥5s, ASR 无文本 | 不触发克隆 | 显示"未能识别" |
 | 已有 voiceId | 正常流程 | 无额外提示 |
 | voiceId 过期 | TTS 自动回退默认 | 下次录音重新学习 |
+
+---
+
+## 十、测试验证记录（2026-03-17）
+
+### API 级测试
+| API | 结果 |
+|-----|------|
+| TTS 生成 10.5s WAV | OK (507KB) |
+| ASR 识别 WAV 音频 | OK "今天天气真不错..." |
+| 文件上传 + 声音克隆 | OK voice-tone-PUGbvqAcgi |
+| 克隆声音 TTS | OK (48KB MP3) |
+
+### UI 集成测试（自动化，MockMediaRecorder + 注入测试音频）
+| 步骤 | 结果 |
+|------|------|
+| 首次录音 >5s, needClone=true | OK |
+| ASR 直连模式识别 | OK |
+| WAV 截断 (1012K→960K, ~10s) | OK |
+| "正在学习你的声音..." UI 状态 | OK |
+| 克隆成功, voiceId 获取 | OK |
+| overrideVoice 传参绕过闭包 | OK |
+| TTS 用克隆声音朗读 | OK |
+| 结果页展示 | OK |
+
+### 提交记录
+- `28513d8` fix: review fixes + add direct StepFun API mode for local dev
+- `1ec18bb` Merge settings UX branch
+- `9d1493f` feat: wait for first voice clone before speak
+- `24c15f5` fix: pass reference text to voice clone API + add v2d design doc
