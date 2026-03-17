@@ -168,8 +168,8 @@ export function useStepfunTTS(): UseStepfunTTSReturn {
       // If cloned voice is invalid, auto-clear and retry with default
       if (!response.ok && effectiveVoice !== 'cixingnansheng') {
         const errData = await response.json().catch(() => ({}));
-        const detail = errData.detail || errData.error || '';
-        if (detail.includes('voice_id_invalid') || detail.includes('does not exist')) {
+        const detail = errData.detail || (typeof errData.error === 'string' ? errData.error : errData.error?.message) || '';
+        if (typeof detail === 'string' && (detail.includes('voice_id_invalid') || detail.includes('does not exist'))) {
           console.warn('[TTS] Invalid voice_id, clearing and retrying with default');
           setVoiceId(null);
           response = await makeRequest('cixingnansheng');
@@ -178,7 +178,10 @@ export function useStepfunTTS(): UseStepfunTTSReturn {
 
       if (!response.ok) {
         const errData = await response.json().catch(() => ({}));
-        throw new Error(errData.error || `TTS 请求失败 (${response.status})`);
+        const ttsErrMsg = typeof errData.error === 'string'
+          ? errData.error
+          : errData.error?.message || `TTS 请求失败 (${response.status})`;
+        throw new Error(ttsErrMsg);
       }
 
       // Stream audio playback - starts playing before full download completes
@@ -280,7 +283,10 @@ export function useStepfunTTS(): UseStepfunTTSReturn {
           if (!response.ok) {
             const errData = await response.json().catch(() => ({}));
             console.error('[cloneVoice] API error:', JSON.stringify(errData));
-            throw new Error(errData.error || `音色复刻失败 (${response.status})`);
+            const cloneErrMsg = typeof errData.error === 'string'
+              ? errData.error
+              : errData.error?.message || `音色复刻失败 (${response.status})`;
+            throw new Error(cloneErrMsg);
           }
           const data = await response.json();
           console.log('[cloneVoice] API response:', JSON.stringify(data));

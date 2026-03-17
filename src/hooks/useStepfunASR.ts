@@ -49,7 +49,11 @@ export function useStepfunASR(): UseStepfunASRReturn {
 
       if (!response.ok) {
         const errData = await response.json().catch(() => ({}));
-        throw new Error(errData.error || `请求失败 (${response.status})`);
+        // StepFun returns {error: {message, type}}, Supabase proxy returns {error: string}
+        const errMsg = typeof errData.error === 'string'
+          ? errData.error
+          : errData.error?.message || `请求失败 (${response.status})`;
+        throw new Error(errMsg);
       }
 
       const data = await response.json();
