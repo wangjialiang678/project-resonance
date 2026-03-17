@@ -49,3 +49,89 @@ P0-5 说明: 8 个 error 全部是预存问题（shadcn/ui 空接口、`@typescr
 **P0: 5/5 PASS | P1: 15/15 PASS**
 
 全量闭环测试通过。
+
+---
+## Round 2 — 2026-03-17 23:25
+
+阶段: UX 修复 + ASR 迁移 + P1 全量回归
+触发原因: v2e UX 修复（引导页3步 + 声音克隆首次录音触发）+ StepFun→DashScope ASR 迁移
+
+### 改动摘要
+
+| Commit | 内容 |
+|--------|------|
+| 0c7d158 | UX fix v2e: 引导页 4→3 步, 去训练步骤, "开始使用"按钮 |
+| f38b21a | ASR 迁移: Workers handler + 前端改用 proxy, 去 VITE_STEPFUN_API_KEY |
+| ff39578 | ASR 修复: 改用 qwen3-asr-flash chat completions (transcriptions endpoint 404) |
+| a67cfd7 | 去除设置页 StepFun 引用 (阶跃星辰→DashScope) |
+
+### P1 验证结果 (Playwright 自动化)
+
+| 测试项 | 判定标准 | 结果 |
+|--------|---------|------|
+| P1-1a 欢迎页显示 | 含"欢迎使用" | PASS |
+| P1-1b 3步引导 | 3个步骤点 | PASS |
+| P1-1c 无训练步骤 | 不含"录音训练" | PASS |
+| P1-1d 最终按钮 | "开始使用" | PASS |
+| P1-1e 导航到首页 | URL 为 / | PASS |
+| P1-2a 首次录音提示 | 含"首次录音" | PASS |
+| P1-2b ASR 标题 | 含"语音识别" | PASS |
+| P1-3a 声音克隆 | 含"声音克隆" | PASS |
+| P1-3b 无 StepFun | 不含"阶跃"/"stepfun" | PASS |
+| P1-4a 安全检查 | dist/ 无 STEPFUN_API_KEY | PASS |
+
+### 失败修复记录
+
+| 测试项 | 失败原因 | 修复 | 尝试次数 |
+|--------|---------|------|---------|
+| P1-3b | ASRSettingsPanel.tsx 仍显示"阶跃星辰" | 改为"DashScope" | 1 |
+| ASR endpoint | DashScope transcriptions API 404 | 改用 qwen3-asr-flash chat completions | 2 |
+
+### 最终结果
+
+**P1: 10/10 PASS**
+
+已部署:
+- Workers API: https://project-resonance-api.project-resonance.workers.dev
+- Frontend: https://project-resonance.pages.dev
+
+---
+## Round 3 — 2026-03-18 00:15
+
+阶段: 代码审查修复 + P1 回归
+触发原因: Codex 代码审查发现 2 Critical + 5 Warning + 3 Suggestion，全部修复
+
+### 改动摘要
+
+| Commit | 内容 |
+|--------|------|
+| 72444d2 | Fix worker auth and clone safety issues |
+
+修复清单（10 项全部通过审查确认）：
+
+| # | 级别 | 问题 | 修复 |
+|---|------|------|------|
+| C1 | Critical | Workers 无鉴权公网代理 | X-App-Token 验证 + WORKER_AUTH_SECRET |
+| C2 | Critical | OSS 音频泄露（失败时不清理） | ossDelete 移入 finally 块 |
+| W1 | Warning | 小程序仍调 /stepfun-asr | 改为 /dashscope-asr |
+| W2 | Warning | 克隆超时竞态 | generation guard 防止晚到结果覆盖 |
+| W3 | Warning | Workers TS 编译失败 | 修复 Uint8Array 泛型、socket 类型 |
+| W4 | Warning | WebSocket 分片未处理 | 添加 continuation frame 处理 |
+| W5 | Warning | 引导页说"全程离线" | 更新为准确描述 |
+| S1 | Suggestion | StepFun 残留清理 | 重命名 hook/errors, 删除 useStepfunTTS |
+| S2 | Suggestion | 前后端文件大小不一致 | 统一 10MB |
+| S3 | Suggestion | CORS 未拒绝未知 Origin | 白名单 + Vary: Origin |
+
+### 验证结果
+
+- `npx tsc -p workers/api/tsconfig.json`: PASS
+- `npm run build`: PASS (6.48s)
+- P1 Playwright 10/10: PASS
+
+### 最终结果
+
+**P0 + P1: 全部通过**
+
+已部署:
+- Workers API: https://project-resonance-api.project-resonance.workers.dev (含 WORKER_AUTH_SECRET)
+- Frontend: https://project-resonance.pages.dev
