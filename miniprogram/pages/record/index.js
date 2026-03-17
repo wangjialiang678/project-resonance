@@ -1,9 +1,8 @@
 const app = getApp();
 let recorderManager = null;
 
-// Edge function URL for ASR
-const SUPABASE_URL = 'https://lwusdbovydwbltxmpctr.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx3dXNkYm92eWR3Ymx0eG1wY3RyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA2MzE1MDYsImV4cCI6MjA4NjIwNzUwNn0.0NtvfE3tUFghE6HNDt9MV6r4xaEt_Nga9aQlHFtbokw';
+// API backend URL — TODO: add /stepfun-asr route to Workers API
+const API_BASE = 'https://project-resonance-api.project-resonance.workers.dev';
 
 Page({
   data: {
@@ -140,16 +139,13 @@ Page({
     retryCount = retryCount || 0;
     this.setData({ state: 'processing', statusText: retryCount > 0 ? `正在重试识别 (${retryCount}/2)...` : '正在识别语音...' });
 
-    console.log('[ASR] Uploading to:', `${SUPABASE_URL}/functions/v1/stepfun-asr`);
+    console.log('[ASR] Uploading to:', `${API_BASE}/stepfun-asr`);
 
     wx.uploadFile({
-      url: `${SUPABASE_URL}/functions/v1/stepfun-asr`,
+      url: `${API_BASE}/stepfun-asr`,
       filePath: filePath,
       name: 'file',
       formData: { model: 'step-asr' },
-      header: {
-        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-      },
       success: (res) => {
         console.log('[ASR] statusCode:', res.statusCode, 'data:', res.data);
         try {

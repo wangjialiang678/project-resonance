@@ -50,14 +50,12 @@ if [ ! -f .env ]; then
   echo -e "${RED}❌ 错误: 项目根目录缺少 .env 文件${NC}"
   echo ""
   echo "请创建 .env 并填入以下内容:"
-  echo "  VITE_SUPABASE_URL=https://lwusdbovydwbltxmpctr.supabase.co"
-  echo "  VITE_SUPABASE_PUBLISHABLE_KEY=<your_anon_key>"
-  echo "  VITE_SUPABASE_PROJECT_ID=lwusdbovydwbltxmpctr"
+  echo "  VITE_API_URL=https://project-resonance-api.project-resonance.workers.dev"
   exit 1
 fi
 
 missing=()
-for var in VITE_SUPABASE_URL VITE_SUPABASE_PUBLISHABLE_KEY; do
+for var in VITE_API_URL; do
   if ! grep -q "^${var}=" .env; then
     missing+=("$var")
   fi
