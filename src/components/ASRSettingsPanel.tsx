@@ -16,7 +16,7 @@ export default function ASRSettingsPanel({ settings, onUpdate }: ASRSettingsPane
         </div>
         <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium bg-success/15 text-success">
           <Zap className="h-3 w-3" aria-hidden="true" />
-          阶跃星辰
+          DashScope
         </span>
       </div>
 
@@ -24,7 +24,7 @@ export default function ASRSettingsPanel({ settings, onUpdate }: ASRSettingsPane
       <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/30 p-3">
         <ShieldCheck className="h-4 w-4 text-success shrink-0" aria-hidden="true" />
         <p className="text-xs text-muted-foreground">
-          API 密钥已在后端安全配置，使用 step-asr 模型进行语音转写
+          API 密钥已在后端安全配置，使用 DashScope ASR 进行语音转写
         </p>
       </div>
 
