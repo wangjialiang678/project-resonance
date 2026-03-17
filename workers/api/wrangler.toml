@@ -1,0 +1,11 @@
+name = "project-resonance-api"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+# Secrets (set via: wrangler secret put <NAME>):
+# DASHSCOPE_API_KEY
+# OSS_ACCESS_KEY_ID
+# OSS_ACCESS_KEY_SECRET
+# OSS_BUCKET
+# OSS_ENDPOINT

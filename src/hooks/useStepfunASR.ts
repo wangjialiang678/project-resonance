@@ -32,20 +32,14 @@ export function useStepfunASR(): UseStepfunASRReturn {
 
       let response: Response;
       if (directKey) {
-        // Direct mode: call StepFun API without Supabase proxy
+        // Direct mode: call StepFun API directly
         response = await fetch('https://api.stepfun.com/v1/audio/transcriptions', {
           method: 'POST',
           headers: { Authorization: `Bearer ${directKey}` },
           body: formData,
         });
       } else {
-        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-        if (!supabaseUrl) throw new Error('未配置后端地址');
-        response = await fetch(`${supabaseUrl}/functions/v1/stepfun-asr`, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}` },
-          body: formData,
-        });
+        throw new Error('请在设置中配置 StepFun API Key（VITE_STEPFUN_API_KEY）');
       }
 
       if (!response.ok) {

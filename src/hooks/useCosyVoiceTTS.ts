@@ -14,6 +14,7 @@ interface UseCosyVoiceTTSReturn {
 
 const VOICE_ID_KEY = 'resonance_cosyvoice_voice_id';
 const DEFAULT_VOICE = 'longanyang';
+const API_BASE = import.meta.env.VITE_API_URL || '';
 
 async function playBlobAudio(
   response: Response,
@@ -85,19 +86,13 @@ export function useCosyVoiceTTS(): UseCosyVoiceTTSReturn {
     }
 
     try {
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      if (!supabaseUrl) throw new Error('未配置后端地址');
-
       setIsSpeaking(true);
 
       const effectiveVoice = overrideVoice || voiceId || DEFAULT_VOICE;
 
-      const makeRequest = async (voice: string) => fetch(`${supabaseUrl}/functions/v1/cosyvoice-tts`, {
+      const makeRequest = async (voice: string) => fetch(`${API_BASE}/cosyvoice-tts`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text, voice }),
       });
 
@@ -141,9 +136,6 @@ export function useCosyVoiceTTS(): UseCosyVoiceTTSReturn {
     setIsCloning(true);
 
     try {
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      if (!supabaseUrl) throw new Error('未配置后端地址');
-
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 90000);
 
@@ -151,11 +143,8 @@ export function useCosyVoiceTTS(): UseCosyVoiceTTSReturn {
         const formData = new FormData();
         formData.append('audio', audioBlob, 'reference.wav');
 
-        const response = await fetch(`${supabaseUrl}/functions/v1/cosyvoice-voice-clone`, {
+        const response = await fetch(`${API_BASE}/cosyvoice-voice-clone`, {
           method: 'POST',
-          headers: {
-            Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-          },
           body: formData,
           signal: controller.signal,
         });

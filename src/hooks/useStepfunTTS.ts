@@ -85,7 +85,7 @@ export function useStepfunTTS(): UseStepfunTTSReturn {
 
       const makeRequest = async (voice: string) => {
         if (directKey) {
-          // Direct mode: call StepFun API without Supabase proxy
+          // Direct mode: call StepFun API directly
           return fetch('https://api.stepfun.com/v1/audio/speech', {
             method: 'POST',
             headers: {
@@ -95,16 +95,7 @@ export function useStepfunTTS(): UseStepfunTTSReturn {
             body: JSON.stringify({ model: 'step-tts-mini', input: text, voice, response_format: 'mp3', speed: 1.0 }),
           });
         }
-        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-        if (!supabaseUrl) throw new Error('未配置后端地址');
-        return fetch(`${supabaseUrl}/functions/v1/stepfun-tts`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-          },
-          body: JSON.stringify({ text, voice, speed: 1.0 }),
-        });
+        throw new Error('请在设置中配置 StepFun API Key（VITE_STEPFUN_API_KEY）');
       };
 
       let response = await makeRequest(effectiveVoice);
@@ -217,26 +208,7 @@ export function useStepfunTTS(): UseStepfunTTSReturn {
           console.log('[cloneVoice] clone result:', JSON.stringify(cloneResult));
           return cloneResult.id;
         } else {
-          const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-          if (!supabaseUrl) throw new Error('未配置后端地址');
-
-          const formData = new FormData();
-          formData.append('audio', audioBlob, 'reference.wav');
-          if (refText) formData.append('text', refText);
-
-          console.log('[cloneVoice] proxy mode — cloning...', refText ? '(with refText)' : '(no refText)');
-          const response = await fetch(`${supabaseUrl}/functions/v1/stepfun-voice-clone`, {
-            method: 'POST',
-            headers: { Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}` },
-            body: formData,
-            signal: controller.signal,
-          });
-          if (!response.ok) {
-            throw new CloneApiError(response.status, await response.text());
-          }
-          const data = await response.json();
-          console.log('[cloneVoice] API response:', JSON.stringify(data));
-          return data.voice_id;
+          throw new Error('请在设置中配置 StepFun API Key（VITE_STEPFUN_API_KEY）');
         }
       };
 

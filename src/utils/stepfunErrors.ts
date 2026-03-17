@@ -2,7 +2,7 @@
  * Map StepFun API HTTP status codes and error payloads to user-friendly Chinese messages.
  *
  * StepFun returns {error: {message, type}} for API errors.
- * Supabase proxy returns {error: string}.
+ * API proxy returns {error: string}.
  */
 
 const STATUS_MESSAGES: Record<number, string> = {
