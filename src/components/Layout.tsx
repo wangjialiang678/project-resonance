@@ -1,7 +1,7 @@
 import { ReactNode, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Mic, BookOpen, Settings, Keyboard, LogOut } from 'lucide-react';
+import { Mic, BookOpen, Settings, Keyboard } from 'lucide-react';
 import SkipToContent from './SkipToContent';
 import KeyboardShortcutsPanel from './KeyboardShortcutsPanel';
 import { useKeyboardShortcuts, useShortcutHelpPanel } from '@/hooks/useKeyboardShortcuts';
@@ -10,7 +10,6 @@ import { shortcutGroups } from '@/data/shortcutGroups';
 
 interface LayoutProps {
   children: ReactNode;
-  onSignOut?: () => Promise<void>;
 }
 
 const tabs = [
@@ -18,7 +17,7 @@ const tabs = [
   { path: '/settings', label: '设置', icon: Settings, shortcutKey: '2' },
 ];
 
-export default function Layout({ children, onSignOut }: LayoutProps) {
+export default function Layout({ children }: LayoutProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const { isOpen: shortcutsOpen, toggle: toggleShortcuts, close: closeShortcuts } = useShortcutHelpPanel();
@@ -109,16 +108,6 @@ export default function Layout({ children, onSignOut }: LayoutProps) {
             >
               <Keyboard className="h-4 w-4" aria-hidden="true" />
             </button>
-            {onSignOut && (
-              <button
-                onClick={() => void onSignOut()}
-                className="a11y-target rounded-lg p-2 text-muted-foreground hover:text-destructive hover:bg-muted transition-colors ml-1"
-                aria-label="退出登录"
-                title="退出登录"
-              >
-                <LogOut className="h-4 w-4" aria-hidden="true" />
-              </button>
-            )}
           </div>
         </div>
       </header>
