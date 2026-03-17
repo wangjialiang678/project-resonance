@@ -8,7 +8,7 @@
 
 import type { Env } from "./env";
 import { corsHeaders, corsResponse } from "./cors";
-// @ts-expect-error — cloudflare:sockets is a Workers built-in
+// @ts-ignore — cloudflare:sockets is a Workers built-in, no type declarations
 import { connect } from "cloudflare:sockets";
 
 const DASHSCOPE_HOST = "dashscope.aliyuncs.com";
@@ -91,6 +91,7 @@ function parseFrames(buf: Uint8Array): { frames: ParsedFrame[]; remaining: Uint8
       if (offset + 10 > buf.length) break;
       payloadLen = 0;
       for (let i = 2; i < 10; i++) payloadLen = payloadLen * 256 + buf[offset + i];
+      if (payloadLen > 100_000_000) throw new Error(`WebSocket frame too large: ${payloadLen}`);
       headerLen = 10;
     }
 
@@ -115,125 +116,120 @@ async function synthesizeSpeech(text: string, voice: string, apiKey: string): Pr
 
   // Connect via TLS to DashScope
   const socket = connect(`${DASHSCOPE_HOST}:443`, { secureTransport: "on" });
-
-  // Manual WebSocket handshake
-  const wsKey = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(16))));
-  const upgradeReq =
-    `GET ${DASHSCOPE_PATH} HTTP/1.1\r\n` +
-    `Host: ${DASHSCOPE_HOST}\r\n` +
-    `Upgrade: websocket\r\n` +
-    `Connection: Upgrade\r\n` +
-    `Sec-WebSocket-Key: ${wsKey}\r\n` +
-    `Sec-WebSocket-Version: 13\r\n` +
-    `Authorization: Bearer ${apiKey}\r\n` +
-    `\r\n`;
-
   const writer = socket.writable.getWriter();
-  await writer.write(new TextEncoder().encode(upgradeReq));
-
   const reader = socket.readable.getReader();
 
-  // Read HTTP upgrade response
-  let httpBuf = new Uint8Array(0);
-  let wsDataBuf = new Uint8Array(0);
+  try {
+    // Manual WebSocket handshake
+    const wsKey = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(16))));
+    const upgradeReq =
+      `GET ${DASHSCOPE_PATH} HTTP/1.1\r\n` +
+      `Host: ${DASHSCOPE_HOST}\r\n` +
+      `Upgrade: websocket\r\n` +
+      `Connection: Upgrade\r\n` +
+      `Sec-WebSocket-Key: ${wsKey}\r\n` +
+      `Sec-WebSocket-Version: 13\r\n` +
+      `Authorization: Bearer ${apiKey}\r\n` +
+      `\r\n`;
 
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) throw new Error("Connection closed during handshake");
+    await writer.write(new TextEncoder().encode(upgradeReq));
 
-    const combined = new Uint8Array(httpBuf.length + value.length);
-    combined.set(httpBuf);
-    combined.set(value, httpBuf.length);
-    httpBuf = combined;
+    // Read HTTP upgrade response
+    let httpBuf = new Uint8Array(0);
+    let wsDataBuf = new Uint8Array(0);
 
-    const headerEnd = new TextDecoder().decode(httpBuf).indexOf("\r\n\r\n");
-    if (headerEnd >= 0) {
-      const httpResponse = new TextDecoder().decode(httpBuf.slice(0, headerEnd));
-      if (!httpResponse.startsWith("HTTP/1.1 101")) {
-        const bodyStart = headerEnd + 4;
-        const responseBody = new TextDecoder().decode(httpBuf.slice(bodyStart, bodyStart + 300));
-        throw new Error(`Handshake ${httpResponse.split("\r\n")[0]}: ${responseBody}`);
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) throw new Error("Connection closed during handshake");
+
+      const combined = new Uint8Array(httpBuf.length + value.length);
+      combined.set(httpBuf);
+      combined.set(value, httpBuf.length);
+      httpBuf = combined;
+
+      const headerEnd = new TextDecoder().decode(httpBuf).indexOf("\r\n\r\n");
+      if (headerEnd >= 0) {
+        const httpResponse = new TextDecoder().decode(httpBuf.slice(0, headerEnd));
+        if (!httpResponse.startsWith("HTTP/1.1 101")) {
+          const bodyStart = headerEnd + 4;
+          const responseBody = new TextDecoder().decode(httpBuf.slice(bodyStart, bodyStart + 300));
+          throw new Error(`Handshake ${httpResponse.split("\r\n")[0]}: ${responseBody}`);
+        }
+        wsDataBuf = httpBuf.slice(headerEnd + 4);
+        break;
       }
-      // Save any remaining data after headers as WebSocket frame data
-      wsDataBuf = httpBuf.slice(headerEnd + 4);
-      break;
     }
-  }
 
-  // Send TTS messages
-  const sendText = async (msg: object) => {
-    await writer.write(encodeTextFrame(JSON.stringify(msg)));
-  };
+    // Send TTS messages
+    const sendText = async (msg: object) => {
+      await writer.write(encodeTextFrame(JSON.stringify(msg)));
+    };
 
-  await sendText({
-    header: { action: "run-task", task_id: taskId, streaming: "duplex" },
-    payload: {
-      task_group: "audio", task: "tts", function: "SpeechSynthesizer",
-      model: MODEL, parameters: { voice, format: "mp3", sample_rate: 22050 }, input: {},
-    },
-  });
-  await sendText({
-    header: { action: "continue-task", task_id: taskId },
-    payload: { input: { text } },
-  });
-  await sendText({
-    header: { action: "finish-task", task_id: taskId },
-    payload: { input: {} },
-  });
+    await sendText({
+      header: { action: "run-task", task_id: taskId, streaming: "duplex" },
+      payload: {
+        task_group: "audio", task: "tts", function: "SpeechSynthesizer",
+        model: MODEL, parameters: { voice, format: "mp3", sample_rate: 22050 }, input: {},
+      },
+    });
+    await sendText({
+      header: { action: "continue-task", task_id: taskId },
+      payload: { input: { text } },
+    });
+    await sendText({
+      header: { action: "finish-task", task_id: taskId },
+      payload: { input: {} },
+    });
 
-  // Read WebSocket frames
-  const audioChunks: Uint8Array[] = [];
-  const deadline = Date.now() + TIMEOUT_MS;
+    // Read WebSocket frames
+    const audioChunks: Uint8Array[] = [];
+    const deadline = Date.now() + TIMEOUT_MS;
 
-  while (Date.now() < deadline) {
-    const { frames, remaining } = parseFrames(wsDataBuf);
-    wsDataBuf = remaining;
+    while (Date.now() < deadline) {
+      const { frames, remaining } = parseFrames(wsDataBuf);
+      wsDataBuf = remaining;
 
-    for (const frame of frames) {
-      if (frame.opcode === 0x8) {
-        // Close frame
-        throw new Error("WebSocket closed by server");
-      }
-      if (frame.opcode === 0x2) {
-        // Binary = audio data
-        audioChunks.push(frame.payload);
-      }
-      if (frame.opcode === 0x1) {
-        // Text = JSON control
-        const msg = JSON.parse(new TextDecoder().decode(frame.payload)) as DashScopeMessage;
-        const err = extractError(msg);
-        if (err) throw new Error(err);
-        if (msg.header?.event === "task-finished") {
-          // Done — merge audio and return
-          const total = audioChunks.reduce((s, c) => s + c.byteLength, 0);
-          const merged = new Uint8Array(total);
-          let off = 0;
-          for (const c of audioChunks) { merged.set(c, off); off += c.byteLength; }
-          // Send close frame
-          await writer.write(encodeCloseFrame());
-          writer.releaseLock();
-          reader.releaseLock();
-          socket.close();
-          return merged;
+      for (const frame of frames) {
+        if (frame.opcode === 0x8) {
+          throw new Error("WebSocket closed by server");
+        }
+        if (frame.opcode === 0x2) {
+          audioChunks.push(frame.payload);
+        }
+        if (frame.opcode === 0x1) {
+          const msg = JSON.parse(new TextDecoder().decode(frame.payload)) as DashScopeMessage;
+          const err = extractError(msg);
+          if (err) throw new Error(err);
+          if (msg.header?.event === "task-finished") {
+            const total = audioChunks.reduce((s, c) => s + c.byteLength, 0);
+            const merged = new Uint8Array(total);
+            let off = 0;
+            for (const c of audioChunks) { merged.set(c, off); off += c.byteLength; }
+            await writer.write(encodeCloseFrame());
+            return merged;
+          }
         }
       }
+
+      const { value, done } = await reader.read();
+      if (done) break;
+      const combined = new Uint8Array(wsDataBuf.length + value.length);
+      combined.set(wsDataBuf);
+      combined.set(value, wsDataBuf.length);
+      wsDataBuf = combined;
     }
 
-    // Read more data
-    const { value, done } = await reader.read();
-    if (done) break;
-    const combined = new Uint8Array(wsDataBuf.length + value.length);
-    combined.set(wsDataBuf);
-    combined.set(value, wsDataBuf.length);
-    wsDataBuf = combined;
+    throw new Error("TTS timeout");
+  } finally {
+    try { writer.releaseLock(); } catch { /* already released */ }
+    try { reader.releaseLock(); } catch { /* already released */ }
+    try { socket.close(); } catch { /* already closed */ }
   }
-
-  throw new Error("TTS timeout");
 }
 
-export async function handleTTS(request: Request, env: Env): Promise<Response> {
+export async function handleTTS(request: Request, env: Env, origin?: string | null): Promise<Response> {
   if (request.method !== "POST") {
-    return corsResponse(JSON.stringify({ error: "Method not allowed" }), 405);
+    return corsResponse(JSON.stringify({ error: "Method not allowed" }), 405, undefined, origin);
   }
 
   try {
@@ -241,16 +237,16 @@ export async function handleTTS(request: Request, env: Env): Promise<Response> {
     const text = typeof body?.text === "string" ? body.text.trim() : "";
     const voice = typeof body?.voice === "string" && body.voice.trim() ? body.voice.trim() : DEFAULT_VOICE;
 
-    if (!text) return corsResponse(JSON.stringify({ error: "Missing 'text'" }), 400);
+    if (!text) return corsResponse(JSON.stringify({ error: "Missing 'text'" }), 400, undefined, origin);
 
     const audio = await synthesizeSpeech(text, voice, env.DASHSCOPE_API_KEY);
 
     return new Response(audio, {
       status: 200,
-      headers: { ...corsHeaders, "Content-Type": "audio/mpeg", "Cache-Control": "no-cache" },
+      headers: { ...corsHeaders(origin), "Content-Type": "audio/mpeg", "Cache-Control": "no-cache" },
     });
   } catch (err) {
     console.error("[tts] Error:", err);
-    return corsResponse(JSON.stringify({ error: err instanceof Error ? err.message : "Unknown error" }), 500);
+    return corsResponse(JSON.stringify({ error: err instanceof Error ? err.message : "Unknown error" }), 500, undefined, origin);
   }
 }

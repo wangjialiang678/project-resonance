@@ -28,6 +28,8 @@ async function playBlobAudio(
 
   return new Promise<void>((resolve) => {
     const cleanup = () => {
+      audio.pause();
+      audio.src = '';
       onEnd();
       URL.revokeObjectURL(audioUrl);
       resolve();
@@ -100,8 +102,10 @@ export function useCosyVoiceTTS(): UseCosyVoiceTTSReturn {
 
       if (!response.ok && effectiveVoice !== DEFAULT_VOICE) {
         const errData = await response.json().catch(() => ({}));
-        const detail = getErrorDetail(errData);
-        if (response.status === 400 || response.status === 404 || detail.includes('voice') || detail.includes('does not exist')) {
+        const detail = getErrorDetail(errData).toLowerCase();
+        const isVoiceInvalid = response.status === 404 ||
+          (response.status === 400 && (detail.includes('not exist') || detail.includes('not found')));
+        if (isVoiceInvalid) {
           console.warn('[CosyVoice TTS] Invalid voice_id, clearing and retrying with default');
           setVoiceId(null);
           response = await makeRequest(DEFAULT_VOICE);

@@ -56,21 +56,26 @@ async function ossUpload(
   const signature = await ossSign("PUT", bucket, objectKey, contentType, date, accessKeySecret);
   const url = `https://${bucket}.${endpoint}/${objectKey}`;
 
-  const resp = await fetch(url, {
-    method: "PUT",
-    headers: {
-      Date: date,
-      "Content-Type": contentType,
-      Authorization: `OSS ${accessKeyId}:${signature}`,
-    },
-    body,
-  });
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const resp = await fetch(url, {
+      method: "PUT",
+      headers: {
+        Date: date,
+        "Content-Type": contentType,
+        Authorization: `OSS ${accessKeyId}:${signature}`,
+      },
+      body,
+    });
 
-  if (!resp.ok) {
+    if (resp.ok) return { ok: true, url };
     const text = await resp.text();
+    if (resp.status >= 500 && attempt === 0) {
+      console.warn("[oss] Upload 5xx, retrying:", resp.status);
+      continue;
+    }
     return { ok: false, url, error: text };
   }
-  return { ok: true, url };
+  return { ok: false, url, error: "OSS upload failed after retries" };
 }
 
 async function ossPresignUrl(
@@ -96,34 +101,37 @@ async function ossDelete(
 ): Promise<void> {
   const date = new Date().toUTCString();
   const signature = await ossSign("DELETE", bucket, objectKey, "", date, accessKeySecret);
-  await fetch(`https://${bucket}.${endpoint}/${objectKey}`, {
+  const resp = await fetch(`https://${bucket}.${endpoint}/${objectKey}`, {
     method: "DELETE",
     headers: { Date: date, Authorization: `OSS ${accessKeyId}:${signature}` },
   });
+  if (!resp.ok) {
+    console.warn("[oss] Delete failed:", resp.status, await resp.text().catch(() => ""));
+  }
 }
 
 // --- Main handler ---
 
-export async function handleClone(request: Request, env: Env): Promise<Response> {
+export async function handleClone(request: Request, env: Env, origin?: string | null): Promise<Response> {
   if (request.method !== "POST") {
-    return corsResponse(JSON.stringify({ error: "Method not allowed" }), 405);
+    return corsResponse(JSON.stringify({ error: "Method not allowed" }), 405, undefined, origin);
   }
 
   try {
     const contentType = request.headers.get("content-type") || "";
     if (!contentType.startsWith("multipart/form-data")) {
-      return corsResponse(JSON.stringify({ error: "Expected multipart/form-data" }), 400);
+      return corsResponse(JSON.stringify({ error: "Expected multipart/form-data" }), 400, undefined, origin);
     }
 
     const formData = await request.formData();
     const audioFile = formData.get("audio") as File | null;
     if (!audioFile) {
-      return corsResponse(JSON.stringify({ error: "Missing 'audio' field" }), 400);
+      return corsResponse(JSON.stringify({ error: "Missing 'audio' field" }), 400, undefined, origin);
     }
 
     const MAX_FILE_SIZE = 10 * 1024 * 1024;
     if (audioFile.size > MAX_FILE_SIZE) {
-      return corsResponse(JSON.stringify({ error: "文件过大（最大 10MB）" }), 400);
+      return corsResponse(JSON.stringify({ error: "文件过大（最大 10MB）" }), 400, undefined, origin);
     }
 
     // Step 1: Upload to OSS
@@ -139,7 +147,7 @@ export async function handleClone(request: Request, env: Env): Promise<Response>
 
     if (!uploadResult.ok) {
       console.error("[clone] OSS upload failed:", uploadResult.error);
-      return corsResponse(JSON.stringify({ error: "音频上传失败", detail: uploadResult.error }), 500);
+      return corsResponse(JSON.stringify({ error: "音频上传失败", detail: uploadResult.error }), 500, undefined, origin);
     }
 
     // Step 2: Pre-signed URL
@@ -174,13 +182,13 @@ export async function handleClone(request: Request, env: Env): Promise<Response>
     if (!cloneResp.ok || cloneResult.code) {
       const errMsg = (cloneResult.message || cloneResult.code || "Clone API error") as string;
       console.error("[clone] Failed:", errMsg);
-      return corsResponse(JSON.stringify({ error: "声音克隆失败", detail: errMsg }), cloneResp.ok ? 400 : cloneResp.status);
+      return corsResponse(JSON.stringify({ error: "声音克隆失败", detail: errMsg }), cloneResp.ok ? 400 : cloneResp.status, undefined, origin);
     }
 
     const output = cloneResult.output as Record<string, unknown> | undefined;
     const voiceId = output?.voice_id as string | undefined;
     if (!voiceId) {
-      return corsResponse(JSON.stringify({ error: "未获取到音色 ID", detail: JSON.stringify(cloneResult) }), 500);
+      return corsResponse(JSON.stringify({ error: "未获取到音色 ID", detail: JSON.stringify(cloneResult) }), 500, undefined, origin);
     }
 
     // Step 4: Cleanup
@@ -191,9 +199,9 @@ export async function handleClone(request: Request, env: Env): Promise<Response>
     }
 
     console.log("[clone] SUCCESS:", voiceId);
-    return corsResponse(JSON.stringify({ voice_id: voiceId }));
+    return corsResponse(JSON.stringify({ voice_id: voiceId }), 200, undefined, origin);
   } catch (err) {
     console.error("[clone] Error:", err);
-    return corsResponse(JSON.stringify({ error: err instanceof Error ? err.message : "Unknown error" }), 500);
+    return corsResponse(JSON.stringify({ error: err instanceof Error ? err.message : "Unknown error" }), 500, undefined, origin);
   }
 }
