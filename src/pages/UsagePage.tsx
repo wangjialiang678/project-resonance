@@ -21,7 +21,7 @@ interface UsagePageProps {
   onClearVoice: () => void;
 }
 
-type FlowState = 'idle' | 'recording' | 'processing' | 'speaking' | 'result';
+type FlowState = 'idle' | 'recording' | 'processing' | 'cloning' | 'speaking' | 'result';
 
 export default function UsagePage({
   onSpeak,
@@ -79,10 +79,8 @@ export default function UsagePage({
   }, [isWechat, startNativeRecording, startRecording]);
 
   const handleStop = useCallback(async () => {
-    // Immediately show processing state for instant feedback
     setFlowState('processing');
 
-    // Only convert to WAV when we need to clone (no voiceId yet, recording might be long enough)
     const needClone = !voiceId;
     console.log('[handleStop] START — voiceId:', voiceId, 'needClone:', needClone);
     const result = await stopRecording({ includeWav: needClone });
@@ -106,21 +104,46 @@ export default function UsagePage({
 
     const text = await transcribe(webmBlob);
 
-    // Silent background clone: after ASR so we have reference text for StepFun validation
-    if (needClone && recDuration >= 5 && wavBlob && text) {
-      console.log('[handleStop] CLONE triggered — sending', wavBlob.size, 'bytes with refText:', text);
-      void onCloneVoice(wavBlob, text).then((vid) => {
-        if (vid) {
-          console.log('[handleStop] CLONE SUCCESS — voiceId:', vid);
-          toast.success('已学习你的音色，下次将用你的声音朗读');
-        } else {
-          console.warn('[handleStop] CLONE returned null (failed silently)');
+    if (needClone && text) {
+      if (recDuration < 5) {
+        toast.info('录音不足5秒，将用默认音色朗读，下次多说几句就能学习你的声音');
+      } else if (wavBlob) {
+        setFlowState('cloning');
+        try {
+          const { truncateWav } = await import('@/utils/audioUtils');
+          const truncatedWav = await truncateWav(wavBlob, 10);
+
+          console.log('[handleStop] CLONE triggered — sending', truncatedWav.size, 'bytes (truncated) with refText:', text);
+
+          const clonePromise = onCloneVoice(truncatedWav, text);
+          const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 20000));
+          const vid = await Promise.race([clonePromise, timeoutPromise]);
+
+          if (vid) {
+            console.log('[handleStop] CLONE SUCCESS — voiceId:', vid);
+            toast.success('已学习你的声音');
+          } else {
+            console.warn('[handleStop] CLONE timeout or returned null');
+            toast.info('声音学习未完成，先用默认音色朗读');
+          }
+        } catch (err) {
+          console.error('[handleStop] CLONE ERROR:', err);
+          toast.info('声音学习未成功，先用默认音色朗读');
         }
-      }).catch((err) => {
-        console.error('[handleStop] CLONE ERROR:', err);
-      });
+      } else {
+        console.log('[handleStop] clone skipped — missing wavBlob for first-time clone');
+      }
     } else {
-      console.log('[handleStop] clone skipped — needClone:', needClone, 'duration:', recDuration.toFixed(1), 's, wavBlob:', !!wavBlob, 'text:', !!text);
+      console.log(
+        '[handleStop] clone skipped — needClone:',
+        needClone,
+        'duration:',
+        recDuration.toFixed(1),
+        's, wavBlob:',
+        !!wavBlob,
+        'text:',
+        !!text
+      );
     }
 
     if (!text) {
@@ -313,8 +336,8 @@ export default function UsagePage({
         </motion.div>
       )}
 
-      {/* Processing / Speaking states */}
-      {(flowState === 'processing' || flowState === 'speaking') && (
+      {/* Processing / Cloning / Speaking states */}
+      {(flowState === 'processing' || flowState === 'cloning' || flowState === 'speaking') && (
         <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
@@ -331,10 +354,14 @@ export default function UsagePage({
           </div>
           <p className="relative text-foreground font-semibold">
             {flowState === 'processing' && '正在识别语音...'}
+            {flowState === 'cloning' && '正在学习你的声音...'}
             {flowState === 'speaking' && '正在朗读...'}
           </p>
           {flowState === 'processing' && (
             <p className="relative text-xs text-muted-foreground animate-pulse">正在上传压缩音频</p>
+          )}
+          {flowState === 'cloning' && (
+            <p className="relative text-xs text-muted-foreground animate-pulse">首次使用，正在学习你的音色</p>
           )}
           {flowState !== 'processing' && displayText && (
             <p className="relative text-sm text-muted-foreground italic">「{displayText}」</p>
