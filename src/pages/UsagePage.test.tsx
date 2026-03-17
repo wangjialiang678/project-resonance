@@ -223,7 +223,7 @@ describe('UsagePage first clone waiting flow', () => {
     });
 
     await vi.waitFor(() => {
-      expect(onSpeak).toHaveBeenCalledWith('请朗读这句话');
+      expect(onSpeak).toHaveBeenCalledWith('请朗读这句话', 'voice-123');
       expect(toastSuccessMock).toHaveBeenCalledWith('已学习你的声音');
     });
   });
