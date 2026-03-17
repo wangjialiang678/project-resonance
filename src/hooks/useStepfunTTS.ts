@@ -15,89 +15,32 @@ interface UseStepfunTTSReturn {
 const VOICE_ID_KEY = 'resonance_cloned_voice_id';
 
 /**
- * Try streaming audio playback via MediaSource Extensions (Chrome/Edge).
- * Falls back to full-blob playback on unsupported browsers (Safari/Firefox).
+ * Play audio from a fetch Response.
+ *
+ * Uses full-blob playback (download first, then play) to avoid MSE truncation
+ * issues with audio/mpeg. TTS responses are typically small (<500KB), so the
+ * latency difference vs streaming is negligible.
  */
 async function playStreamingAudio(
   response: Response,
   audioRef: React.MutableRefObject<HTMLAudioElement | null>,
   onEnd: () => void,
 ): Promise<void> {
-  const body = response.body;
+  const audioBlob = await response.blob();
+  const audioUrl = URL.createObjectURL(audioBlob);
+  const audio = new Audio(audioUrl);
+  audioRef.current = audio;
 
-  // Check MSE support for audio/mpeg
-  const mseSupported =
-    typeof MediaSource !== 'undefined' &&
-    MediaSource.isTypeSupported('audio/mpeg');
-
-  if (mseSupported && body) {
-    // --- Streaming playback: start playing as soon as first chunks arrive ---
-    const audio = new Audio();
-    audioRef.current = audio;
-
-    const mediaSource = new MediaSource();
-    audio.src = URL.createObjectURL(mediaSource);
-
-    await new Promise<void>((resolve, reject) => {
-      mediaSource.addEventListener('sourceopen', async () => {
-        try {
-          const sourceBuffer = mediaSource.addSourceBuffer('audio/mpeg');
-          const reader = body.getReader();
-          let started = false;
-
-          const appendChunk = (chunk: ArrayBuffer) =>
-            new Promise<void>((res) => {
-              sourceBuffer.appendBuffer(chunk);
-              sourceBuffer.addEventListener('updateend', () => res(), { once: true });
-            });
-
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) {
-              if (mediaSource.readyState === 'open') {
-                mediaSource.endOfStream();
-              }
-              break;
-            }
-            if (value) {
-              await appendChunk(value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength) as ArrayBuffer);
-              // Start playback after first chunk is buffered
-              if (!started) {
-                started = true;
-                audio.play().catch(() => {});
-              }
-            }
-          }
-
-          audio.onended = () => { onEnd(); resolve(); };
-          audio.onerror = () => { onEnd(); resolve(); };
-
-          // If audio already ended (very short clip)
-          if (audio.ended) { onEnd(); resolve(); }
-        } catch (e) {
-          onEnd();
-          reject(e);
-        }
-      }, { once: true });
-    });
-  } else {
-    // --- Fallback: full-blob playback ---
-    const audioBlob = await response.blob();
-    const audioUrl = URL.createObjectURL(audioBlob);
-    const audio = new Audio(audioUrl);
-    audioRef.current = audio;
-
-    audio.onended = () => {
+  return new Promise<void>((resolve) => {
+    const cleanup = () => {
       onEnd();
       URL.revokeObjectURL(audioUrl);
+      resolve();
     };
-    audio.onerror = () => {
-      onEnd();
-      URL.revokeObjectURL(audioUrl);
-    };
-
-    await audio.play();
-  }
+    audio.onended = cleanup;
+    audio.onerror = cleanup;
+    audio.play().catch(cleanup);
+  });
 }
 
 export function useStepfunTTS(): UseStepfunTTSReturn {
