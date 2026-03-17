@@ -17,7 +17,7 @@ interface UsagePageProps {
   ttsError: string | null;
   voiceId: string | null;
   isCloning: boolean;
-  onCloneVoice: (audioBlob: Blob) => Promise<string | null>;
+  onCloneVoice: (audioBlob: Blob, referenceText?: string) => Promise<string | null>;
   onClearVoice: () => void;
 }
 
@@ -104,10 +104,12 @@ export default function UsagePage({
       wavBlob?.type ?? '(none)'
     );
 
-    // Silent background clone: first recording ≥ 5s triggers clone without blocking
-    if (needClone && recDuration >= 5 && wavBlob) {
-      console.log('[handleStop] CLONE triggered — sending', wavBlob.size, 'bytes to cloneVoice');
-      void onCloneVoice(wavBlob).then((vid) => {
+    const text = await transcribe(webmBlob);
+
+    // Silent background clone: after ASR so we have reference text for StepFun validation
+    if (needClone && recDuration >= 5 && wavBlob && text) {
+      console.log('[handleStop] CLONE triggered — sending', wavBlob.size, 'bytes with refText:', text);
+      void onCloneVoice(wavBlob, text).then((vid) => {
         if (vid) {
           console.log('[handleStop] CLONE SUCCESS — voiceId:', vid);
           toast.success('已学习你的音色，下次将用你的声音朗读');
@@ -118,10 +120,8 @@ export default function UsagePage({
         console.error('[handleStop] CLONE ERROR:', err);
       });
     } else {
-      console.log('[handleStop] clone skipped — needClone:', needClone, 'duration:', recDuration.toFixed(1), 's, wavBlob:', !!wavBlob);
+      console.log('[handleStop] clone skipped — needClone:', needClone, 'duration:', recDuration.toFixed(1), 's, wavBlob:', !!wavBlob, 'text:', !!text);
     }
-
-    const text = await transcribe(webmBlob);
 
     if (!text) {
       setFlowState('result');
