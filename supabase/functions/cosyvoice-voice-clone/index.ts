@@ -3,12 +3,11 @@
  *
  * Flow:
  * 1. Receive audio blob via FormData
- * 2. Upload to Supabase Storage (public bucket) to get a public URL
+ * 2. Upload to Alibaba Cloud OSS to get a public URL (same cloud as CosyVoice, near-zero latency)
  * 3. Call CosyVoice REST API to create a cloned voice
- * 4. Return voice_id
+ * 4. Cleanup temp OSS object
+ * 5. Return voice_id
  */
-
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -18,6 +17,106 @@ const corsHeaders = {
 
 const COSYVOICE_CLONE_URL =
   "https://dashscope.aliyuncs.com/api/v1/services/audio/tts/customization";
+
+// --- OSS Helpers (HMAC-SHA1 signature) ---
+
+async function hmacSha1(key: ArrayBuffer, message: string): Promise<ArrayBuffer> {
+  const cryptoKey = await crypto.subtle.importKey(
+    "raw",
+    key,
+    { name: "HMAC", hash: "SHA-1" },
+    false,
+    ["sign"],
+  );
+  return crypto.subtle.sign("HMAC", cryptoKey, new TextEncoder().encode(message));
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary);
+}
+
+async function ossSign(
+  method: string,
+  bucket: string,
+  objectKey: string,
+  contentType: string,
+  dateOrExpires: string,
+  accessKeySecret: string,
+): Promise<string> {
+  const stringToSign = `${method}\n\n${contentType}\n${dateOrExpires}\n/${bucket}/${objectKey}`;
+  const sig = await hmacSha1(new TextEncoder().encode(accessKeySecret).buffer, stringToSign);
+  return arrayBufferToBase64(sig);
+}
+
+async function ossUpload(
+  bucket: string,
+  endpoint: string,
+  accessKeyId: string,
+  accessKeySecret: string,
+  objectKey: string,
+  body: ArrayBuffer,
+  contentType: string,
+): Promise<{ ok: boolean; status: number; url: string; error?: string }> {
+  const date = new Date().toUTCString();
+  const signature = await ossSign("PUT", bucket, objectKey, contentType, date, accessKeySecret);
+  const url = `https://${bucket}.${endpoint}/${objectKey}`;
+
+  const resp = await fetch(url, {
+    method: "PUT",
+    headers: {
+      Date: date,
+      "Content-Type": contentType,
+      Authorization: `OSS ${accessKeyId}:${signature}`,
+    },
+    body,
+  });
+
+  if (!resp.ok) {
+    const text = await resp.text();
+    return { ok: false, status: resp.status, url, error: text };
+  }
+  return { ok: true, status: resp.status, url };
+}
+
+/** Generate a pre-signed URL for GET access (valid for `expiresSec` seconds) */
+async function ossPresignUrl(
+  bucket: string,
+  endpoint: string,
+  accessKeyId: string,
+  accessKeySecret: string,
+  objectKey: string,
+  expiresSec = 600,
+): Promise<string> {
+  const expires = Math.floor(Date.now() / 1000) + expiresSec;
+  const signature = await ossSign("GET", bucket, objectKey, "", String(expires), accessKeySecret);
+  const encodedSig = encodeURIComponent(signature);
+  return `https://${bucket}.${endpoint}/${objectKey}?OSSAccessKeyId=${accessKeyId}&Expires=${expires}&Signature=${encodedSig}`;
+}
+
+async function ossDelete(
+  bucket: string,
+  endpoint: string,
+  accessKeyId: string,
+  accessKeySecret: string,
+  objectKey: string,
+): Promise<void> {
+  const date = new Date().toUTCString();
+  const signature = await ossSign("DELETE", bucket, objectKey, "", date, accessKeySecret);
+  const url = `https://${bucket}.${endpoint}/${objectKey}`;
+
+  await fetch(url, {
+    method: "DELETE",
+    headers: {
+      Date: date,
+      Authorization: `OSS ${accessKeyId}:${signature}`,
+    },
+  });
+}
+
+// --- Main handler ---
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -42,11 +141,13 @@ Deno.serve(async (req) => {
     );
   }
 
-  const supabaseUrl = Deno.env.get("SUPABASE_URL");
-  const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-  if (!supabaseUrl || !supabaseServiceKey) {
+  const ossBucket = Deno.env.get("OSS_BUCKET");
+  const ossEndpoint = Deno.env.get("OSS_ENDPOINT");
+  const ossKeyId = Deno.env.get("OSS_ACCESS_KEY_ID");
+  const ossKeySecret = Deno.env.get("OSS_ACCESS_KEY_SECRET");
+  if (!ossBucket || !ossEndpoint || !ossKeyId || !ossKeySecret) {
     return new Response(
-      JSON.stringify({ error: "Supabase not configured" }),
+      JSON.stringify({ error: "OSS not configured" }),
       {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -78,7 +179,7 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Validate file size (max 10MB) and type
+    // Validate file size (max 10MB)
     const MAX_FILE_SIZE = 10 * 1024 * 1024;
     if (audioFile.size > MAX_FILE_SIZE) {
       return new Response(
@@ -90,26 +191,28 @@ Deno.serve(async (req) => {
       );
     }
 
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
-
-    // Step 1: Upload audio to Supabase Storage
+    // Step 1: Upload audio to Alibaba Cloud OSS
     const fileId = crypto.randomUUID();
-    const filePath = `voice-clone/${fileId}.wav`;
+    const objectKey = `voice-clone/${fileId}.wav`;
 
-    console.log("[cosyvoice-clone] Uploading audio to Storage...", filePath);
-    const { error: uploadError } = await supabase.storage
-      .from("voice-samples")
-      .upload(filePath, audioFile, {
-        contentType: "audio/wav",
-        upsert: false,
-      });
+    console.log("[cosyvoice-clone] Uploading audio to OSS...", objectKey);
+    const audioBuffer = await audioFile.arrayBuffer();
+    const uploadResult = await ossUpload(
+      ossBucket,
+      ossEndpoint,
+      ossKeyId,
+      ossKeySecret,
+      objectKey,
+      audioBuffer,
+      "audio/wav",
+    );
 
-    if (uploadError) {
-      console.error("[cosyvoice-clone] Storage upload failed:", uploadError);
+    if (!uploadResult.ok) {
+      console.error("[cosyvoice-clone] OSS upload failed:", uploadResult.error);
       return new Response(
         JSON.stringify({
           error: "音频上传失败",
-          detail: uploadError.message,
+          detail: uploadResult.error,
         }),
         {
           status: 500,
@@ -118,12 +221,11 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Step 2: Get public URL
-    const {
-      data: { publicUrl },
-    } = supabase.storage.from("voice-samples").getPublicUrl(filePath);
-
-    console.log("[cosyvoice-clone] Public URL:", publicUrl);
+    // Step 2: Generate pre-signed URL (valid 10 minutes, enough for CosyVoice to download)
+    const publicUrl = await ossPresignUrl(
+      ossBucket, ossEndpoint, ossKeyId, ossKeySecret, objectKey, 600,
+    );
+    console.log("[cosyvoice-clone] Pre-signed URL generated");
 
     // Step 3: Call CosyVoice clone API
     // prefix: only lowercase letters and digits, max 10 chars
@@ -184,12 +286,12 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Step 4: Cleanup temp audio (best-effort)
+    // Step 4: Cleanup temp audio from OSS (best-effort)
     try {
-      await supabase.storage.from("voice-samples").remove([filePath]);
-      console.log("[cosyvoice-clone] Temp audio cleaned up");
+      await ossDelete(ossBucket, ossEndpoint, ossKeyId, ossKeySecret, objectKey);
+      console.log("[cosyvoice-clone] Temp audio cleaned up from OSS");
     } catch (cleanupErr) {
-      console.warn("[cosyvoice-clone] Cleanup failed (non-critical):", cleanupErr);
+      console.warn("[cosyvoice-clone] OSS cleanup failed (non-critical):", cleanupErr);
     }
 
     console.log("[cosyvoice-clone] SUCCESS, voice_id:", voiceId);
