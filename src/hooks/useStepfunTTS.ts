@@ -156,79 +156,103 @@ export function useStepfunTTS(): UseStepfunTTSReturn {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 60000);
 
-      try {
-        let newVoiceId: string | undefined;
+      /** Custom error that preserves raw API response for CER detection */
+      class CloneApiError extends Error {
+        constructor(public status: number, public rawBody: string) {
+          // Parse for user-friendly display
+          let parsed: Record<string, unknown> = {};
+          try { parsed = JSON.parse(rawBody); } catch { /* not JSON */ }
+          super(formatStepfunError(status, parsed, '音色复刻'));
+        }
+        get isCerFailure(): boolean {
+          return this.rawBody.includes('CER_NOT_PASS');
+        }
+      }
 
+      // Direct mode: upload once, reuse fileId for retries
+      let uploadedFileId: string | undefined;
+
+      const ensureFileUploaded = async (): Promise<string> => {
+        if (uploadedFileId) return uploadedFileId;
+        const uploadForm = new FormData();
+        uploadForm.append('file', audioBlob, 'reference.wav');
+        uploadForm.append('purpose', 'storage');
+
+        console.log('[cloneVoice] direct mode — uploading to StepFun...');
+        const uploadResp = await fetch('https://api.stepfun.com/v1/files', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${directKey}` },
+          body: uploadForm,
+          signal: controller.signal,
+        });
+        if (!uploadResp.ok) {
+          const errData = await uploadResp.json().catch(() => ({}));
+          throw new Error(formatStepfunError(uploadResp.status, errData, '上传音频'));
+        }
+        const uploadResult = await uploadResp.json();
+        uploadedFileId = uploadResult.id;
+        if (!uploadedFileId) throw new Error('上传成功但未获取到 file_id');
+        console.log('[cloneVoice] file uploaded, id:', uploadedFileId);
+        return uploadedFileId;
+      };
+
+      /** Attempt clone with optional referenceText */
+      const attemptClone = async (refText?: string): Promise<string | undefined> => {
         if (directKey) {
-          // Direct mode: call StepFun API without Supabase proxy
-          // Step 1: upload audio file
-          const uploadForm = new FormData();
-          uploadForm.append('file', audioBlob, 'reference.wav');
-          uploadForm.append('purpose', 'storage');
-
-          console.log('[cloneVoice] direct mode — uploading to StepFun...');
-          const uploadResp = await fetch('https://api.stepfun.com/v1/files', {
-            method: 'POST',
-            headers: { Authorization: `Bearer ${directKey}` },
-            body: uploadForm,
-            signal: controller.signal,
-          });
-          if (!uploadResp.ok) {
-            const errData = await uploadResp.json().catch(() => ({}));
-            throw new Error(formatStepfunError(uploadResp.status, errData, '上传音频'));
-          }
-          const uploadResult = await uploadResp.json();
-          const fileId = uploadResult.id;
-          if (!fileId) throw new Error('上传成功但未获取到 file_id');
-          console.log('[cloneVoice] file uploaded, id:', fileId);
-
-          // Step 2: clone voice
+          const fileId = await ensureFileUploaded();
           const cloneBody: Record<string, unknown> = { file_id: fileId, model: 'step-tts-mini' };
-          if (referenceText) cloneBody.text = referenceText;
+          if (refText) cloneBody.text = refText;
 
-          console.log('[cloneVoice] direct mode — cloning voice...');
+          console.log('[cloneVoice] direct mode — cloning voice...', refText ? '(with refText)' : '(no refText)');
           const cloneResp = await fetch('https://api.stepfun.com/v1/audio/voices', {
             method: 'POST',
-            headers: {
-              Authorization: `Bearer ${directKey}`,
-              'Content-Type': 'application/json',
-            },
+            headers: { Authorization: `Bearer ${directKey}`, 'Content-Type': 'application/json' },
             body: JSON.stringify(cloneBody),
             signal: controller.signal,
           });
           if (!cloneResp.ok) {
-            const errData = await cloneResp.json().catch(() => ({}));
-            throw new Error(formatStepfunError(cloneResp.status, errData, '音色复刻'));
+            throw new CloneApiError(cloneResp.status, await cloneResp.text());
           }
           const cloneResult = await cloneResp.json();
           console.log('[cloneVoice] clone result:', JSON.stringify(cloneResult));
-          newVoiceId = cloneResult.id;
+          return cloneResult.id;
         } else {
-          // Proxy mode: call via Supabase Edge Function
           const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
           if (!supabaseUrl) throw new Error('未配置后端地址');
 
           const formData = new FormData();
           formData.append('audio', audioBlob, 'reference.wav');
-          if (referenceText) formData.append('text', referenceText);
+          if (refText) formData.append('text', refText);
 
-          console.log('[cloneVoice] proxy mode — fetching', supabaseUrl + '/functions/v1/stepfun-voice-clone');
+          console.log('[cloneVoice] proxy mode — cloning...', refText ? '(with refText)' : '(no refText)');
           const response = await fetch(`${supabaseUrl}/functions/v1/stepfun-voice-clone`, {
             method: 'POST',
             headers: { Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}` },
             body: formData,
             signal: controller.signal,
           });
-
-          console.log('[cloneVoice] response status:', response.status);
           if (!response.ok) {
-            const errData = await response.json().catch(() => ({}));
-            console.error('[cloneVoice] API error:', JSON.stringify(errData));
-            throw new Error(formatStepfunError(response.status, errData, '音色复刻'));
+            throw new CloneApiError(response.status, await response.text());
           }
           const data = await response.json();
           console.log('[cloneVoice] API response:', JSON.stringify(data));
-          newVoiceId = data.voice_id;
+          return data.voice_id;
+        }
+      };
+
+      try {
+        let newVoiceId: string | undefined;
+
+        try {
+          newVoiceId = await attemptClone(referenceText);
+        } catch (firstErr) {
+          // CER_NOT_PASS: ASR text mismatch too high → retry without referenceText
+          if (referenceText && firstErr instanceof CloneApiError && firstErr.isCerFailure) {
+            console.warn('[cloneVoice] CER check failed, retrying without referenceText...');
+            newVoiceId = await attemptClone(); // reuses uploaded fileId
+          } else {
+            throw firstErr;
+          }
         }
 
         if (newVoiceId) {
