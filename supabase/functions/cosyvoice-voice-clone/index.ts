@@ -56,7 +56,7 @@ Deno.serve(async (req) => {
 
   try {
     const contentType = req.headers.get("content-type") || "";
-    if (!contentType.includes("multipart/form-data")) {
+    if (!contentType.startsWith("multipart/form-data")) {
       return new Response(
         JSON.stringify({ error: "Expected multipart/form-data" }),
         {
@@ -71,6 +71,18 @@ Deno.serve(async (req) => {
     if (!audioFile) {
       return new Response(
         JSON.stringify({ error: "Missing 'audio' field" }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
+    }
+
+    // Validate file size (max 10MB) and type
+    const MAX_FILE_SIZE = 10 * 1024 * 1024;
+    if (audioFile.size > MAX_FILE_SIZE) {
+      return new Response(
+        JSON.stringify({ error: "文件过大（最大 10MB）" }),
         {
           status: 400,
           headers: { ...corsHeaders, "Content-Type": "application/json" },

@@ -106,7 +106,7 @@ export function useCosyVoiceTTS(): UseCosyVoiceTTSReturn {
       if (!response.ok && effectiveVoice !== DEFAULT_VOICE) {
         const errData = await response.json().catch(() => ({}));
         const detail = getErrorDetail(errData);
-        if (detail.includes('voice_id_invalid') || detail.includes('does not exist')) {
+        if (response.status === 400 || response.status === 404 || detail.includes('voice') || detail.includes('does not exist')) {
           console.warn('[CosyVoice TTS] Invalid voice_id, clearing and retrying with default');
           setVoiceId(null);
           response = await makeRequest(DEFAULT_VOICE);
