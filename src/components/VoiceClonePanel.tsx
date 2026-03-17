@@ -124,6 +124,7 @@ export default function VoiceClonePanel({
 
           <button
             onClick={() => {
+              if (isSpeaking) onStop();
               onClearVoice();
               toast.info('已清除克隆音色，将使用默认音色');
             }}

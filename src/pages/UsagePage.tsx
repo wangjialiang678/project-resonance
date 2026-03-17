@@ -11,7 +11,7 @@ import { useAccessibility } from '@/hooks/useAccessibility';
 import { toast } from 'sonner';
 
 interface UsagePageProps {
-  onSpeak: (text: string) => Promise<void>;
+  onSpeak: (text: string, overrideVoice?: string) => Promise<void>;
   onStop: () => void;
   isSpeaking: boolean;
   ttsError: string | null;
@@ -109,6 +109,7 @@ export default function UsagePage({
         toast.info('录音不足5秒，将用默认音色朗读，下次多说几句就能学习你的声音');
       } else if (wavBlob) {
         setFlowState('cloning');
+        let clonedVid: string | null = null;
         try {
           const { truncateWav } = await import('@/utils/audioUtils');
           const truncatedWav = await truncateWav(wavBlob, 10);
@@ -116,12 +117,17 @@ export default function UsagePage({
           console.log('[handleStop] CLONE triggered — sending', truncatedWav.size, 'bytes (truncated) with refText:', text);
 
           const clonePromise = onCloneVoice(truncatedWav, text);
-          const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 20000));
+          let timeoutId: ReturnType<typeof setTimeout>;
+          const timeoutPromise = new Promise<null>((resolve) => {
+            timeoutId = setTimeout(() => resolve(null), 20000);
+          });
           const vid = await Promise.race([clonePromise, timeoutPromise]);
+          clearTimeout(timeoutId!);
 
           if (vid) {
             console.log('[handleStop] CLONE SUCCESS — voiceId:', vid);
             toast.success('已学习你的声音');
+            clonedVid = vid;
           } else {
             console.warn('[handleStop] CLONE timeout or returned null');
             toast.info('声音学习未完成，先用默认音色朗读');
@@ -129,6 +135,15 @@ export default function UsagePage({
         } catch (err) {
           console.error('[handleStop] CLONE ERROR:', err);
           toast.info('声音学习未成功，先用默认音色朗读');
+        }
+
+        // 克隆成功后用克隆音色朗读（onSpeak 闭包中 voiceId 尚未更新，需显式传入）
+        if (clonedVid && text) {
+          setLastTranscript(text);
+          setFlowState('speaking');
+          try { await onSpeak(text, clonedVid); } catch { /* handled by parent */ }
+          setFlowState('result');
+          return;
         }
       } else {
         console.log('[handleStop] clone skipped — missing wavBlob for first-time clone');

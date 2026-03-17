@@ -24,22 +24,28 @@ export function useStepfunASR(): UseStepfunASRReturn {
     setFinalText('');
 
     try {
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      if (!supabaseUrl) {
-        throw new Error('未配置后端地址');
-      }
-
+      const directKey = import.meta.env.VITE_STEPFUN_API_KEY;
       const formData = new FormData();
       formData.append('file', audioBlob, 'recording.webm');
       formData.append('model', 'step-asr');
 
-      const response = await fetch(`${supabaseUrl}/functions/v1/stepfun-asr`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-        },
-        body: formData,
-      });
+      let response: Response;
+      if (directKey) {
+        // Direct mode: call StepFun API without Supabase proxy
+        response = await fetch('https://api.stepfun.com/v1/audio/transcriptions', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${directKey}` },
+          body: formData,
+        });
+      } else {
+        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+        if (!supabaseUrl) throw new Error('未配置后端地址');
+        response = await fetch(`${supabaseUrl}/functions/v1/stepfun-asr`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}` },
+          body: formData,
+        });
+      }
 
       if (!response.ok) {
         const errData = await response.json().catch(() => ({}));

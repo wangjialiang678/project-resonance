@@ -133,14 +133,26 @@ export function useStepfunTTS(): UseStepfunTTSReturn {
     }
 
     try {
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      if (!supabaseUrl) throw new Error('未配置后端地址');
+      const directKey = import.meta.env.VITE_STEPFUN_API_KEY;
 
       setIsSpeaking(true);
 
       const effectiveVoice = overrideVoice || voiceId || 'cixingnansheng';
 
       const makeRequest = async (voice: string) => {
+        if (directKey) {
+          // Direct mode: call StepFun API without Supabase proxy
+          return fetch('https://api.stepfun.com/v1/audio/speech', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${directKey}`,
+            },
+            body: JSON.stringify({ model: 'step-tts-mini', input: text, voice, response_format: 'mp3', speed: 1.0 }),
+          });
+        }
+        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+        if (!supabaseUrl) throw new Error('未配置后端地址');
         return fetch(`${supabaseUrl}/functions/v1/stepfun-tts`, {
           method: 'POST',
           headers: {
@@ -194,48 +206,92 @@ export function useStepfunTTS(): UseStepfunTTSReturn {
     setIsCloning(true);
 
     try {
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      if (!supabaseUrl) throw new Error('未配置后端地址');
-
-      const formData = new FormData();
-      formData.append('audio', audioBlob, 'reference.wav');
-      if (referenceText) {
-        formData.append('text', referenceText);
-      }
+      const directKey = import.meta.env.VITE_STEPFUN_API_KEY;
 
       // 60s timeout to prevent infinite spinner (clone involves upload + API call)
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 60000);
 
-      console.log('[cloneVoice] fetching', supabaseUrl + '/functions/v1/stepfun-voice-clone');
       try {
-        const response = await fetch(`${supabaseUrl}/functions/v1/stepfun-voice-clone`, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-          },
-          body: formData,
-          signal: controller.signal,
-        });
+        let newVoiceId: string | undefined;
 
-        console.log('[cloneVoice] response status:', response.status);
+        if (directKey) {
+          // Direct mode: call StepFun API without Supabase proxy
+          // Step 1: upload audio file
+          const uploadForm = new FormData();
+          uploadForm.append('file', audioBlob, 'reference.wav');
+          uploadForm.append('purpose', 'storage');
 
-        if (!response.ok) {
-          const errData = await response.json().catch(() => ({}));
-          console.error('[cloneVoice] API error:', JSON.stringify(errData));
-          throw new Error(errData.error || `音色复刻失败 (${response.status})`);
+          console.log('[cloneVoice] direct mode — uploading to StepFun...');
+          const uploadResp = await fetch('https://api.stepfun.com/v1/files', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${directKey}` },
+            body: uploadForm,
+            signal: controller.signal,
+          });
+          if (!uploadResp.ok) {
+            const errText = await uploadResp.text();
+            throw new Error(`上传音频失败 (${uploadResp.status}): ${errText}`);
+          }
+          const uploadResult = await uploadResp.json();
+          const fileId = uploadResult.id;
+          if (!fileId) throw new Error('上传成功但未获取到 file_id');
+          console.log('[cloneVoice] file uploaded, id:', fileId);
+
+          // Step 2: clone voice
+          const cloneBody: Record<string, unknown> = { file_id: fileId, model: 'step-tts-mini' };
+          if (referenceText) cloneBody.text = referenceText;
+
+          console.log('[cloneVoice] direct mode — cloning voice...');
+          const cloneResp = await fetch('https://api.stepfun.com/v1/audio/voices', {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${directKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(cloneBody),
+            signal: controller.signal,
+          });
+          if (!cloneResp.ok) {
+            const errText = await cloneResp.text();
+            throw new Error(`音色复刻失败 (${cloneResp.status}): ${errText}`);
+          }
+          const cloneResult = await cloneResp.json();
+          console.log('[cloneVoice] clone result:', JSON.stringify(cloneResult));
+          newVoiceId = cloneResult.id;
+        } else {
+          // Proxy mode: call via Supabase Edge Function
+          const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+          if (!supabaseUrl) throw new Error('未配置后端地址');
+
+          const formData = new FormData();
+          formData.append('audio', audioBlob, 'reference.wav');
+          if (referenceText) formData.append('text', referenceText);
+
+          console.log('[cloneVoice] proxy mode — fetching', supabaseUrl + '/functions/v1/stepfun-voice-clone');
+          const response = await fetch(`${supabaseUrl}/functions/v1/stepfun-voice-clone`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}` },
+            body: formData,
+            signal: controller.signal,
+          });
+
+          console.log('[cloneVoice] response status:', response.status);
+          if (!response.ok) {
+            const errData = await response.json().catch(() => ({}));
+            console.error('[cloneVoice] API error:', JSON.stringify(errData));
+            throw new Error(errData.error || `音色复刻失败 (${response.status})`);
+          }
+          const data = await response.json();
+          console.log('[cloneVoice] API response:', JSON.stringify(data));
+          newVoiceId = data.voice_id;
         }
-
-        const data = await response.json();
-        console.log('[cloneVoice] API response:', JSON.stringify(data));
-        const newVoiceId = data.voice_id;
 
         if (newVoiceId) {
           setVoiceId(newVoiceId);
           console.log('[cloneVoice] SUCCESS — voiceId:', newVoiceId);
           return newVoiceId;
         }
-
         throw new Error('未获取到音色 ID');
       } finally {
         clearTimeout(timeout);
