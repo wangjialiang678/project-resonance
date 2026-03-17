@@ -1,6 +1,8 @@
 import { useState, useCallback } from 'react';
 import { formatStepfunError } from '@/utils/stepfunErrors';
 
+const API_BASE = import.meta.env.VITE_API_URL || '';
+
 interface UseStepfunASRReturn {
   /** Transcribed text */
   finalText: string;
@@ -8,7 +10,7 @@ interface UseStepfunASRReturn {
   isProcessing: boolean;
   /** Error message if any */
   error: string | null;
-  /** Send recorded audio blob to StepFun for transcription */
+  /** Send recorded audio blob to ASR proxy for transcription */
   transcribe: (audioBlob: Blob) => Promise<string | null>;
   /** Reset state */
   reset: () => void;
@@ -25,22 +27,12 @@ export function useStepfunASR(): UseStepfunASRReturn {
     setFinalText('');
 
     try {
-      const directKey = import.meta.env.VITE_STEPFUN_API_KEY;
       const formData = new FormData();
       formData.append('file', audioBlob, 'recording.webm');
-      formData.append('model', 'step-asr');
-
-      let response: Response;
-      if (directKey) {
-        // Direct mode: call StepFun API directly
-        response = await fetch('https://api.stepfun.com/v1/audio/transcriptions', {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${directKey}` },
-          body: formData,
-        });
-      } else {
-        throw new Error('请在设置中配置 StepFun API Key（VITE_STEPFUN_API_KEY）');
-      }
+      const response = await fetch(`${API_BASE}/dashscope-asr`, {
+        method: 'POST',
+        body: formData,
+      });
 
       if (!response.ok) {
         const errData = await response.json().catch(() => ({}));
@@ -48,7 +40,7 @@ export function useStepfunASR(): UseStepfunASRReturn {
       }
 
       const data = await response.json();
-      const text = data.text?.trim() || '';
+      const text = typeof data.text === 'string' ? data.text.trim() : '';
       
       if (text) {
         setFinalText(text);

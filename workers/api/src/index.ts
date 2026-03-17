@@ -4,6 +4,7 @@
  * Routes:
  *   POST /cosyvoice-tts         → Text-to-speech via DashScope CosyVoice
  *   POST /cosyvoice-voice-clone → Voice cloning via DashScope + OSS
+ *   POST /dashscope-asr         → Audio transcription via DashScope ASR
  */
 
 import type { Env } from "./env";
@@ -11,6 +12,7 @@ import { validateEnv } from "./env";
 import { handleCORS, corsResponse } from "./cors";
 import { handleTTS } from "./cosyvoice-tts";
 import { handleClone } from "./cosyvoice-clone";
+import { handleASR } from "./dashscope-asr";
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -34,6 +36,8 @@ export default {
         return handleTTS(request, env, origin);
       case "/cosyvoice-voice-clone":
         return handleClone(request, env, origin);
+      case "/dashscope-asr":
+        return handleASR(request, env, origin);
       default:
         return corsResponse(JSON.stringify({ error: "Not found" }), 404, undefined, origin);
     }
