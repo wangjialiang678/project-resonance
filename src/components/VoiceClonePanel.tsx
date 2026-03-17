@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { Mic, MicOff, Volume2, Check, Loader2, AlertCircle, Trash2, Upload } from 'lucide-react';
+import { Mic, MicOff, Volume2, Check, Loader2, AlertCircle, Trash2, Upload, Square } from 'lucide-react';
 import { useAudioRecorder } from '@/hooks/useAudioRecorder';
 import { toast } from 'sonner';
 
@@ -96,44 +96,52 @@ export default function VoiceClonePanel({
   // Already has a cloned voice
   if (voiceId) {
     return (
-      <div className="rounded-xl border border-border bg-card p-5 space-y-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-success/15">
-              <Check className="h-4 w-4 text-success" />
-            </div>
-            <div>
-              <h3 className="font-semibold text-foreground text-sm">声音已克隆</h3>
-              <p className="text-xs text-muted-foreground truncate max-w-[180px]">
-                ID: {voiceId}
-              </p>
-            </div>
+      <div id="voice-clone-section" className="rounded-2xl border border-border/60 bg-card p-5 space-y-3">
+        <div className="flex items-center gap-2">
+          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-success/10">
+            <Check className="h-4 w-4 text-success" />
           </div>
+          <h3 className="font-semibold text-foreground">声音已克隆</h3>
+        </div>
+
+        <div className="flex gap-2">
+          <button
+            onClick={handleTest}
+            className="flex-1 flex items-center justify-center gap-2 rounded-xl border border-border py-2.5 text-sm font-medium hover:bg-muted/50 transition-colors"
+          >
+            {isSpeaking ? (
+              <>
+                <Square className="h-4 w-4" />
+                停止试听
+              </>
+            ) : (
+              <>
+                <Volume2 className="h-4 w-4" />
+                试听克隆音色
+              </>
+            )}
+          </button>
+
           <button
             onClick={() => {
               onClearVoice();
               toast.info('已清除克隆音色，将使用默认音色');
             }}
-            className="p-2 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+            className="flex items-center justify-center gap-2 rounded-xl border border-destructive/30 px-4 py-2.5 text-sm font-medium text-destructive hover:bg-destructive/5 transition-colors"
             aria-label="清除克隆音色"
           >
             <Trash2 className="h-4 w-4" />
+            清除
           </button>
         </div>
 
-        <button
-          onClick={handleTest}
-          className="w-full flex items-center justify-center gap-2 rounded-lg bg-primary py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
-        >
-          <Volume2 className="h-4 w-4" />
-          {isSpeaking ? '停止试听' : '试听克隆音色'}
-        </button>
+        <p className="text-xs text-muted-foreground">如需更换声音，清除后重新录制</p>
       </div>
     );
   }
 
   return (
-    <div className="rounded-xl border border-border bg-card p-5 space-y-4">
+    <div id="voice-clone-section" className="rounded-xl border border-border bg-card p-5 space-y-4">
       <div>
         <h3 className="font-semibold text-foreground">声音克隆</h3>
         <p className="text-xs text-muted-foreground mt-1">

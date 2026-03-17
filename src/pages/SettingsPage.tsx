@@ -40,6 +40,10 @@ export default function SettingsPage({
     onUpdate({ ...settings, [key]: value });
   };
 
+  const scrollToVoiceClone = () => {
+    document.getElementById('voice-clone-section')?.scrollIntoView({ behavior: 'smooth' });
+  };
+
   return (
     <section className="max-w-lg mx-auto space-y-5" aria-labelledby="settings-heading">
       <div>
@@ -61,13 +65,13 @@ export default function SettingsPage({
           <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" aria-hidden="true" />
         </button>
         <button
-          onClick={() => navigate('/training')}
+          onClick={scrollToVoiceClone}
           className="w-full flex items-center gap-3 px-5 py-3.5 text-left hover:bg-muted/50 transition-colors a11y-target"
         >
           <Mic className="h-4 w-4 text-primary shrink-0" aria-hidden="true" />
           <div className="flex-1 min-w-0">
-            <span className="text-sm font-medium text-foreground">录音训练</span>
-            <p className="text-xs text-muted-foreground">录制语音样本用于个性化识别</p>
+            <span className="text-sm font-medium text-foreground">声音克隆</span>
+            <p className="text-xs text-muted-foreground">录制或上传样本来复刻你的声音</p>
           </div>
           <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" aria-hidden="true" />
         </button>
