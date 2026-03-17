@@ -136,13 +136,23 @@ export async function handleClone(request: Request, env: Env, origin?: string | 
 
     // Step 1: Upload to OSS
     const fileId = crypto.randomUUID();
-    const objectKey = `voice-clone/${fileId}.wav`;
+    const mimeType = audioFile.type || "audio/wav";
+    const ext = mimeType.includes("webm")
+      ? "webm"
+      : mimeType.includes("mp3") || mimeType.includes("mpeg")
+        ? "mp3"
+        : mimeType.includes("ogg")
+          ? "ogg"
+          : mimeType.includes("flac")
+            ? "flac"
+            : "wav";
+    const objectKey = `voice-clone/${fileId}.${ext}`;
 
-    console.log("[clone] Uploading to OSS:", objectKey);
+    console.log("[clone] Uploading to OSS:", objectKey, "mimeType:", mimeType);
     const audioBuffer = await audioFile.arrayBuffer();
     const uploadResult = await ossUpload(
       env.OSS_BUCKET, env.OSS_ENDPOINT, env.OSS_ACCESS_KEY_ID, env.OSS_ACCESS_KEY_SECRET,
-      objectKey, audioBuffer, "audio/wav",
+      objectKey, audioBuffer, mimeType,
     );
 
     if (!uploadResult.ok) {

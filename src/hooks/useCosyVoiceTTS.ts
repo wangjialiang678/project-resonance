@@ -184,7 +184,11 @@ export function useCosyVoiceTTS(): UseCosyVoiceTTSReturn {
       }
     } catch (err) {
       const message = err instanceof Error
-        ? (err.name === 'AbortError' ? '声音克隆超时，请重试' : err.message)
+        ? (err.name === 'AbortError'
+          ? '声音克隆超时，请重试'
+          : err.message === 'Failed to fetch'
+            ? '网络连接失败，请检查网络后重试'
+            : err.message)
         : '音色复刻失败';
       console.error('[cosyvoice clone] CATCH:', message, err);
       setError(message);

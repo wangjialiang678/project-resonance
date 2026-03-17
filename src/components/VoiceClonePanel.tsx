@@ -40,8 +40,9 @@ export default function VoiceClonePanel({
 
   const handleStopRecording = useCallback(async () => {
     const result = await stopRecording();
-    if (result?.blob) {
-      setRecordedBlob(result.blob);
+    if (result) {
+      const blob = result.blob || result.webmBlob;
+      setRecordedBlob(blob);
       setRecordedDuration(result.duration);
     }
   }, [stopRecording]);
@@ -76,12 +77,17 @@ export default function VoiceClonePanel({
       toast.error('录音至少需要 5 秒，请重新录制');
       return;
     }
-    const vid = await onClone(recordedBlob, '今天天气真不错，我想出去走走');
-    if (vid) {
-      toast.success('声音克隆成功！');
-      setRecordedBlob(null);
-      setRecordedDuration(null);
-      setUploadedFileName(null);
+    try {
+      const vid = await onClone(recordedBlob, '今天天气真不错，我想出去走走');
+      if (vid) {
+        toast.success('声音克隆成功！');
+        setRecordedBlob(null);
+        setRecordedDuration(null);
+        setUploadedFileName(null);
+      }
+    } catch (err) {
+      console.error('[VoiceClonePanel] Clone failed:', err);
+      // Error is already set by useCosyVoiceTTS hook
     }
   }, [recordedBlob, recordedDuration, onClone]);
 
