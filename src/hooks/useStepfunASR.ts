@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react';
+import { formatStepfunError } from '@/utils/stepfunErrors';
 
 interface UseStepfunASRReturn {
   /** Transcribed text */
@@ -49,11 +50,7 @@ export function useStepfunASR(): UseStepfunASRReturn {
 
       if (!response.ok) {
         const errData = await response.json().catch(() => ({}));
-        // StepFun returns {error: {message, type}}, Supabase proxy returns {error: string}
-        const errMsg = typeof errData.error === 'string'
-          ? errData.error
-          : errData.error?.message || `请求失败 (${response.status})`;
-        throw new Error(errMsg);
+        throw new Error(formatStepfunError(response.status, errData, '语音识别'));
       }
 
       const data = await response.json();

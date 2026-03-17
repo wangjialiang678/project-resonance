@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
+import { formatStepfunError } from '@/utils/stepfunErrors';
 
 interface UseStepfunTTSReturn {
   speak: (text: string, overrideVoice?: string) => Promise<void>;
@@ -178,10 +179,7 @@ export function useStepfunTTS(): UseStepfunTTSReturn {
 
       if (!response.ok) {
         const errData = await response.json().catch(() => ({}));
-        const ttsErrMsg = typeof errData.error === 'string'
-          ? errData.error
-          : errData.error?.message || `TTS 请求失败 (${response.status})`;
-        throw new Error(ttsErrMsg);
+        throw new Error(formatStepfunError(response.status, errData, '语音合成'));
       }
 
       // Stream audio playback - starts playing before full download completes
@@ -233,8 +231,8 @@ export function useStepfunTTS(): UseStepfunTTSReturn {
             signal: controller.signal,
           });
           if (!uploadResp.ok) {
-            const errText = await uploadResp.text();
-            throw new Error(`上传音频失败 (${uploadResp.status}): ${errText}`);
+            const errData = await uploadResp.json().catch(() => ({}));
+            throw new Error(formatStepfunError(uploadResp.status, errData, '上传音频'));
           }
           const uploadResult = await uploadResp.json();
           const fileId = uploadResult.id;
@@ -256,8 +254,8 @@ export function useStepfunTTS(): UseStepfunTTSReturn {
             signal: controller.signal,
           });
           if (!cloneResp.ok) {
-            const errText = await cloneResp.text();
-            throw new Error(`音色复刻失败 (${cloneResp.status}): ${errText}`);
+            const errData = await cloneResp.json().catch(() => ({}));
+            throw new Error(formatStepfunError(cloneResp.status, errData, '音色复刻'));
           }
           const cloneResult = await cloneResp.json();
           console.log('[cloneVoice] clone result:', JSON.stringify(cloneResult));
@@ -283,10 +281,7 @@ export function useStepfunTTS(): UseStepfunTTSReturn {
           if (!response.ok) {
             const errData = await response.json().catch(() => ({}));
             console.error('[cloneVoice] API error:', JSON.stringify(errData));
-            const cloneErrMsg = typeof errData.error === 'string'
-              ? errData.error
-              : errData.error?.message || `音色复刻失败 (${response.status})`;
-            throw new Error(cloneErrMsg);
+            throw new Error(formatStepfunError(response.status, errData, '音色复刻'));
           }
           const data = await response.json();
           console.log('[cloneVoice] API response:', JSON.stringify(data));
