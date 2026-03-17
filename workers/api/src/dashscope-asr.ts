@@ -5,7 +5,7 @@
  * Flow: FormData audio → base64 → chat completions → text
  */
 
-import type { Env } from "./env";
+import type { ValidatedEnv } from "./env";
 import { corsResponse } from "./cors";
 
 const DASHSCOPE_CHAT_URL =
@@ -30,7 +30,7 @@ function mimeFromName(name: string): string {
 
 export async function handleASR(
   request: Request,
-  env: Env,
+  env: ValidatedEnv,
   origin?: string | null,
 ): Promise<Response> {
   if (request.method !== "POST") {

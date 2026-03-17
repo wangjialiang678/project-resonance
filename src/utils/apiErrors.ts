@@ -1,8 +1,7 @@
 /**
- * Map StepFun API HTTP status codes and error payloads to user-friendly Chinese messages.
+ * Map API HTTP status codes and error payloads to user-friendly Chinese messages.
  *
- * StepFun returns {error: {message, type}} for API errors.
- * API proxy returns {error: string}.
+ * Upstream APIs may return {error: {message, type}} or {error: string}.
  */
 
 const STATUS_MESSAGES: Record<number, string> = {
@@ -25,7 +24,7 @@ function extractErrorDetail(errData: Record<string, unknown>): string | undefine
   return undefined;
 }
 
-export function formatStepfunError(
+export function formatApiError(
   status: number,
   errData: Record<string, unknown>,
   context: string,

@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from 'react';
-import { formatStepfunError } from '@/utils/stepfunErrors';
+import { formatApiError } from '@/utils/apiErrors';
 
 interface UseCosyVoiceTTSReturn {
   speak: (text: string, overrideVoice?: string) => Promise<void>;
@@ -9,12 +9,14 @@ interface UseCosyVoiceTTSReturn {
   isCloning: boolean;
   voiceId: string | null;
   setVoiceId: (id: string | null) => void;
+  cancelPendingClone: () => void;
   error: string | null;
 }
 
 const VOICE_ID_KEY = 'resonance_cosyvoice_voice_id';
 const DEFAULT_VOICE = 'longanyang';
 const API_BASE = import.meta.env.VITE_API_URL || '';
+const APP_TOKEN = import.meta.env.VITE_APP_TOKEN || 'resonance-2026';
 
 async function playBlobAudio(
   response: Response,
@@ -64,6 +66,7 @@ export function useCosyVoiceTTS(): UseCosyVoiceTTSReturn {
   });
   const [error, setError] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const cloneGenerationRef = useRef(0);
 
   const setVoiceId = useCallback((id: string | null) => {
     setVoiceIdState(id);
@@ -94,7 +97,10 @@ export function useCosyVoiceTTS(): UseCosyVoiceTTSReturn {
 
       const makeRequest = async (voice: string) => fetch(`${API_BASE}/cosyvoice-tts`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-App-Token': APP_TOKEN,
+        },
         body: JSON.stringify({ text, voice }),
       });
 
@@ -114,7 +120,7 @@ export function useCosyVoiceTTS(): UseCosyVoiceTTSReturn {
 
       if (!response.ok) {
         const errData = await response.json().catch(() => ({}));
-        throw new Error(formatStepfunError(response.status, errData, '语音合成'));
+        throw new Error(formatApiError(response.status, errData, '语音合成'));
       }
 
       await playBlobAudio(response, audioRef, () => setIsSpeaking(false));
@@ -134,69 +140,78 @@ export function useCosyVoiceTTS(): UseCosyVoiceTTSReturn {
     setError(null);
   }, []);
 
+  const cancelPendingClone = useCallback(() => {
+    cloneGenerationRef.current += 1;
+    setIsCloning(false);
+  }, []);
+
   const cloneVoice = useCallback(async (audioBlob: Blob, _referenceText?: string): Promise<string | null> => {
+    const cloneGeneration = cloneGenerationRef.current + 1;
+    cloneGenerationRef.current = cloneGeneration;
     console.log('[cosyvoice clone] START — blob size:', audioBlob.size, 'type:', audioBlob.type);
     setError(null);
     setIsCloning(true);
 
     try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 90000);
+      const formData = new FormData();
+      formData.append('audio', audioBlob, 'reference.wav');
 
-      try {
-        const formData = new FormData();
-        formData.append('audio', audioBlob, 'reference.wav');
+      const response = await fetch(`${API_BASE}/cosyvoice-voice-clone`, {
+        method: 'POST',
+        headers: {
+          'X-App-Token': APP_TOKEN,
+        },
+        body: formData,
+      });
 
-        const response = await fetch(`${API_BASE}/cosyvoice-voice-clone`, {
-          method: 'POST',
-          body: formData,
-          signal: controller.signal,
-        });
-
-        if (!response.ok) {
-          const rawText = await response.text();
-          let errData: Record<string, unknown> = {};
-          try {
-            errData = JSON.parse(rawText) as Record<string, unknown>;
-          } catch {
-            if (rawText) errData = { error: rawText };
-          }
-          throw new Error(formatStepfunError(response.status, errData, '音色复刻'));
+      if (!response.ok) {
+        const rawText = await response.text();
+        let errData: Record<string, unknown> = {};
+        try {
+          errData = JSON.parse(rawText) as Record<string, unknown>;
+        } catch {
+          if (rawText) errData = { error: rawText };
         }
-
-        const data = await response.json();
-        const newVoiceId =
-          typeof data.voice_id === 'string'
-            ? data.voice_id
-            : typeof data.id === 'string'
-              ? data.id
-              : null;
-
-        if (!newVoiceId) {
-          throw new Error('未获取到音色 ID');
-        }
-
-        setVoiceId(newVoiceId);
-        console.log('[cosyvoice clone] SUCCESS — voiceId:', newVoiceId);
-        return newVoiceId;
-      } finally {
-        clearTimeout(timeout);
+        throw new Error(formatApiError(response.status, errData, '音色复刻'));
       }
+
+      const data = await response.json();
+      const newVoiceId =
+        typeof data.voice_id === 'string'
+          ? data.voice_id
+          : typeof data.id === 'string'
+            ? data.id
+            : null;
+
+      if (!newVoiceId) {
+        throw new Error('未获取到音色 ID');
+      }
+
+      if (cloneGenerationRef.current !== cloneGeneration) {
+        console.warn('[cosyvoice clone] IGNORE stale clone result');
+        return null;
+      }
+
+      console.log('[cosyvoice clone] SUCCESS — voiceId:', newVoiceId);
+      return newVoiceId;
     } catch (err) {
+      if (cloneGenerationRef.current !== cloneGeneration) {
+        return null;
+      }
       const message = err instanceof Error
-        ? (err.name === 'AbortError'
-          ? '声音克隆超时，请重试'
-          : err.message === 'Failed to fetch'
-            ? '网络连接失败，请检查网络后重试'
-            : err.message)
+        ? (err.message === 'Failed to fetch'
+          ? '网络连接失败，请检查网络后重试'
+          : err.message)
         : '音色复刻失败';
       console.error('[cosyvoice clone] CATCH:', message, err);
       setError(message);
       return null;
     } finally {
-      setIsCloning(false);
+      if (cloneGenerationRef.current === cloneGeneration) {
+        setIsCloning(false);
+      }
     }
-  }, [setVoiceId]);
+  }, []);
 
   return {
     speak,
@@ -206,6 +221,7 @@ export function useCosyVoiceTTS(): UseCosyVoiceTTSReturn {
     isCloning,
     voiceId,
     setVoiceId,
+    cancelPendingClone,
     error,
   };
 }

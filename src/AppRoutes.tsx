@@ -56,15 +56,24 @@ export default function AppRoutes() {
   );
 
   const {
-    speak: stepfunSpeak,
-    stop: stepfunStop,
-    isSpeaking: stepfunIsSpeaking,
+    speak: apiSpeak,
+    stop: apiStop,
+    isSpeaking: apiIsSpeaking,
     cloneVoice,
     isCloning,
     voiceId,
     setVoiceId,
+    cancelPendingClone,
     error: ttsError,
   } = useCosyVoiceTTS();
+
+  const cloneAndPersistVoiceId = async (audioBlob: Blob, referenceText?: string) => {
+    const nextVoiceId = await cloneVoice(audioBlob, referenceText);
+    if (nextVoiceId) {
+      setVoiceId(nextVoiceId);
+    }
+    return nextVoiceId;
+  };
 
   const trainedCount = useMemo(
     () => phrases.filter((p) => p.enabled && p.recordingCount >= 2).length,
@@ -99,13 +108,14 @@ export default function AppRoutes() {
           path="/"
           element={
             <UsagePage
-              onSpeak={stepfunSpeak}
-              onStop={stepfunStop}
-              isSpeaking={stepfunIsSpeaking}
+              onSpeak={apiSpeak}
+              onStop={apiStop}
+              isSpeaking={apiIsSpeaking}
               ttsError={ttsError}
               voiceId={voiceId}
               isCloning={isCloning}
-              onCloneVoice={cloneVoice}
+              onCloneVoice={cloneAndPersistVoiceId}
+              onCancelCloneResult={cancelPendingClone}
               onClearVoice={() => setVoiceId(null)}
             />
           }
@@ -142,10 +152,10 @@ export default function AppRoutes() {
               voiceId={voiceId}
               isCloning={isCloning}
               ttsError={ttsError}
-              onCloneVoice={cloneVoice}
-              onSpeak={stepfunSpeak}
-              onStop={stepfunStop}
-              isSpeaking={stepfunIsSpeaking}
+              onCloneVoice={cloneAndPersistVoiceId}
+              onSpeak={apiSpeak}
+              onStop={apiStop}
+              isSpeaking={apiIsSpeaking}
               onClearVoice={() => setVoiceId(null)}
             />
           }

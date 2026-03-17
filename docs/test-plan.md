@@ -22,7 +22,7 @@
 
 - [ ] **P0-4: Workers API 可达**
   判定标准: `POST /cosyvoice-tts` 返回 HTTP 200 + 音频数据 >1KB
-  建议命令: `curl -s -X POST $API_URL/cosyvoice-tts -H "Content-Type: application/json" -d '{"text":"你好"}' -o /tmp/test.mp3 && ls -la /tmp/test.mp3`
+  建议命令: `curl -s -X POST $API_URL/cosyvoice-tts -H "Content-Type: application/json" -H "X-App-Token: $APP_TOKEN" -d '{"text":"你好"}' -o /tmp/test.mp3 && ls -la /tmp/test.mp3`
 
 - [ ] **P0-5: Lint 通过**
   判定标准: `bun run lint` 退出码=0
@@ -36,7 +36,7 @@
 
 - [ ] **P1-1a [后端]** TTS API 返回有效音频
   判定标准: POST /cosyvoice-tts `{"text":"今天天气真不错"}` → HTTP 200, Content-Type=audio/mpeg, body >5KB
-  建议命令: curl + 检查 response headers 和 body size
+  建议命令: curl + `X-App-Token` header，检查 response headers 和 body size
 
 - [ ] **P1-1b [前端]** 页面加载 → 使用页正常渲染
   判定标准: 访问 `http://localhost:8080` → 页面包含"共鸣"标题文字，无 JS 错误
@@ -50,11 +50,11 @@
 
 - [ ] **P1-2a [后端]** Clone API 接受音频上传
   判定标准: POST /cosyvoice-voice-clone (FormData with WAV) → HTTP 200, 返回 JSON 含 voice_id
-  建议命令: curl -F "audio=@fixtures/test-5s.wav" $API_URL/cosyvoice-voice-clone
+  建议命令: curl -H "X-App-Token: $APP_TOKEN" -F "audio=@fixtures/test-5s.wav" $API_URL/cosyvoice-voice-clone
 
 - [ ] **P1-2b [后端]** Clone 后的 voice_id 可用于 TTS
   判定标准: POST /cosyvoice-tts `{"text":"测试","voice":"<cloned_id>"}` → HTTP 200, 音频 >5KB
-  建议命令: curl (用 P1-2a 返回的 voice_id)
+  建议命令: curl + `X-App-Token` (用 P1-2a 返回的 voice_id)
 
 - [ ] **P1-2c [前端]** VoiceClonePanel UI 可见且可交互
   判定标准: 设置页 → 声音克隆面板可见，包含录音/上传按钮
@@ -108,7 +108,7 @@
 
 - [ ] **M1** 麦克风录音 → ASR 识别 → 文字结果
   原因: 需要真实麦克风输入
-  注: 后端 ASR 链路为 StepFun 直连，由用户 API Key 驱动
+  注: 后端 ASR 链路为 DashScope + Workers，由服务端密钥驱动
 
 - [ ] **M2** 录音 → 自动触发 Voice Clone → 克隆音色 TTS
   原因: 需要真实麦克风 + 5秒以上语音

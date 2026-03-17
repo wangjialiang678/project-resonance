@@ -24,8 +24,8 @@ export interface RecognitionResult {
 }
 
 export interface ASRSettings {
-  /** ASR provider: 'stepfun' or 'volcengine' */
-  provider: 'stepfun' | 'volcengine';
+  /** ASR provider: 'dashscope' or 'volcengine' */
+  provider: 'dashscope' | 'volcengine';
   appKey: string;
   accessKey: string;
   resourceId: string;
@@ -34,7 +34,7 @@ export interface ASRSettings {
 }
 
 export const DEFAULT_ASR_SETTINGS: ASRSettings = {
-  provider: 'stepfun',
+  provider: 'dashscope',
   appKey: '',
   accessKey: '',
   resourceId: 'volc.bigasr.sauc.duration',

@@ -9,3 +9,4 @@ compatibility_flags = ["nodejs_compat"]
 # OSS_ACCESS_KEY_SECRET
 # OSS_BUCKET
 # OSS_ENDPOINT
+# WORKER_AUTH_SECRET

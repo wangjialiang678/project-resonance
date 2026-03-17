@@ -57,8 +57,8 @@ export default function VoiceClonePanel({
       return;
     }
 
-    if (file.size > 20 * 1024 * 1024) {
-      toast.error('文件大小不能超过 20MB');
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error('文件大小不能超过 10MB');
       return;
     }
 
@@ -156,6 +156,9 @@ export default function VoiceClonePanel({
         </p>
         <p className="mt-2 rounded-lg bg-muted/50 px-3 py-2 text-sm text-foreground italic text-center">
           「今天天气真不错，我想出去走走」
+        </p>
+        <p className="mt-2 text-xs text-muted-foreground">
+          支持 WAV、MP3、WebM、OGG、FLAC，文件大小不超过 10MB。
         </p>
       </div>
 

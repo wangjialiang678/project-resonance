@@ -36,8 +36,8 @@ vi.mock('@/hooks/useAudioRecorder', () => ({
   }),
 }));
 
-vi.mock('@/hooks/useStepfunASR', () => ({
-  useStepfunASR: () => ({
+vi.mock('@/hooks/useDashscopeASR', () => ({
+  useDashscopeASR: () => ({
     finalText: '',
     isProcessing: false,
     error: null,
@@ -150,6 +150,7 @@ describe('UsagePage first clone waiting flow', () => {
           voiceId={null}
           isCloning={false}
           onCloneVoice={onCloneVoice}
+          onCancelCloneResult={vi.fn()}
           onClearVoice={vi.fn()}
         />
       );
@@ -196,6 +197,7 @@ describe('UsagePage first clone waiting flow', () => {
           voiceId={null}
           isCloning={false}
           onCloneVoice={onCloneVoice}
+          onCancelCloneResult={vi.fn()}
           onClearVoice={vi.fn()}
         />
       );
@@ -226,5 +228,67 @@ describe('UsagePage first clone waiting flow', () => {
       expect(onSpeak).toHaveBeenCalledWith('请朗读这句话', 'voice-123');
       expect(toastSuccessMock).toHaveBeenCalledWith('已学习你的声音');
     });
+  });
+
+  it('cancels stale clone result after the 20s fallback timeout', async () => {
+    vi.useFakeTimers();
+    const webmBlob = new NodeBlob(['webm'], { type: 'audio/webm' });
+    const wavBlob = new NodeBlob(['wav'], { type: 'audio/wav' });
+    const truncatedWavBlob = new NodeBlob(['truncated'], { type: 'audio/wav' });
+    const onSpeak = vi.fn().mockResolvedValue(undefined);
+    const onCloneVoice = vi.fn();
+    const onCancelCloneResult = vi.fn();
+    const cloneRequest = deferred<string | null>();
+
+    stopRecordingMock.mockResolvedValueOnce({
+      webmBlob,
+      wavBlob,
+      duration: 6.5,
+    });
+    transcribeMock.mockResolvedValueOnce('先用默认音色朗读');
+    truncateWavMock.mockResolvedValueOnce(truncatedWavBlob);
+    onCloneVoice.mockReturnValueOnce(cloneRequest.promise);
+
+    try {
+      await act(async () => {
+        root.render(
+          <UsagePage
+            onSpeak={onSpeak}
+            onStop={vi.fn()}
+            isSpeaking={false}
+            ttsError={null}
+            voiceId={null}
+            isCloning={false}
+            onCloneVoice={onCloneVoice}
+            onCancelCloneResult={onCancelCloneResult}
+            onClearVoice={vi.fn()}
+          />
+        );
+      });
+
+      await act(async () => {
+        container.querySelector('button')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(20000);
+      });
+
+      await vi.waitFor(() => {
+        expect(onCancelCloneResult).toHaveBeenCalledTimes(1);
+        expect(onSpeak).toHaveBeenCalledWith('先用默认音色朗读');
+        expect(toastInfoMock).toHaveBeenCalledWith('声音学习未完成，先用默认音色朗读');
+      });
+
+      await act(async () => {
+        cloneRequest.resolve('voice-late');
+        await cloneRequest.promise;
+      });
+
+      expect(onSpeak).not.toHaveBeenCalledWith('先用默认音色朗读', 'voice-late');
+      expect(toastSuccessMock).not.toHaveBeenCalledWith('已学习你的声音');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

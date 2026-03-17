@@ -1,9 +1,10 @@
 import { useState, useCallback } from 'react';
-import { formatStepfunError } from '@/utils/stepfunErrors';
+import { formatApiError } from '@/utils/apiErrors';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
+const APP_TOKEN = import.meta.env.VITE_APP_TOKEN || 'resonance-2026';
 
-interface UseStepfunASRReturn {
+interface UseDashscopeASRReturn {
   /** Transcribed text */
   finalText: string;
   /** Whether transcription is in progress */
@@ -16,7 +17,7 @@ interface UseStepfunASRReturn {
   reset: () => void;
 }
 
-export function useStepfunASR(): UseStepfunASRReturn {
+export function useDashscopeASR(): UseDashscopeASRReturn {
   const [finalText, setFinalText] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -31,12 +32,15 @@ export function useStepfunASR(): UseStepfunASRReturn {
       formData.append('file', audioBlob, 'recording.webm');
       const response = await fetch(`${API_BASE}/dashscope-asr`, {
         method: 'POST',
+        headers: {
+          'X-App-Token': APP_TOKEN,
+        },
         body: formData,
       });
 
       if (!response.ok) {
         const errData = await response.json().catch(() => ({}));
-        throw new Error(formatStepfunError(response.status, errData, '语音识别'));
+        throw new Error(formatApiError(response.status, errData, '语音识别'));
       }
 
       const data = await response.json();

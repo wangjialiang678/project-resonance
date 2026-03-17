@@ -6,7 +6,7 @@
  * (Workers' fetch() strips custom headers from WebSocket upgrades).
  */
 
-import type { Env } from "./env";
+import type { ValidatedEnv } from "./env";
 import { corsHeaders, corsResponse } from "./cors";
 // @ts-ignore — cloudflare:sockets is a Workers built-in, no type declarations
 import { connect } from "cloudflare:sockets";
@@ -25,6 +25,12 @@ interface DashScopeMessage {
   code?: number; message?: string;
 }
 
+interface ParsedFrame {
+  fin: boolean;
+  opcode: number;
+  payload: Uint8Array<ArrayBufferLike>;
+}
+
 function extractError(msg: DashScopeMessage): string | null {
   const code = msg.header?.code ?? msg.payload?.output?.code ?? msg.code;
   if (typeof code === "number" && code !== 0)
@@ -36,7 +42,7 @@ function extractError(msg: DashScopeMessage): string | null {
 
 // --- Minimal WebSocket frame encoder/decoder ---
 
-function encodeFrame(data: Uint8Array, opcode: number): Uint8Array {
+function encodeFrame(data: Uint8Array<ArrayBufferLike>, opcode: number): Uint8Array {
   const len = data.byteLength;
   const mask = crypto.getRandomValues(new Uint8Array(4));
   let header: number[];
@@ -67,10 +73,21 @@ function encodeCloseFrame(): Uint8Array {
   return encodeFrame(new Uint8Array([0x03, 0xe8]), 0x8); // 1000 normal close
 }
 
-// Simple frame parser — handles text (0x1) and binary (0x2) frames
-interface ParsedFrame { opcode: number; payload: Uint8Array; }
+function concatUint8Arrays(...chunks: ArrayLike<number>[]): Uint8Array<ArrayBufferLike> {
+  const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  const combined = new Uint8Array(totalLength);
+  let offset = 0;
+  for (const chunk of chunks) {
+    combined.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return combined;
+}
 
-function parseFrames(buf: Uint8Array): { frames: ParsedFrame[]; remaining: Uint8Array } {
+function parseFrames(buf: Uint8Array<ArrayBufferLike>): {
+  frames: ParsedFrame[];
+  remaining: Uint8Array<ArrayBufferLike>;
+} {
   const frames: ParsedFrame[] = [];
   let offset = 0;
 
@@ -78,6 +95,7 @@ function parseFrames(buf: Uint8Array): { frames: ParsedFrame[]; remaining: Uint8
     if (offset + 2 > buf.length) break;
     const byte0 = buf[offset];
     const byte1 = buf[offset + 1];
+    const fin = (byte0 & 0x80) !== 0;
     const opcode = byte0 & 0x0f;
     const masked = (byte1 & 0x80) !== 0;
     let payloadLen = byte1 & 0x7f;
@@ -101,10 +119,14 @@ function parseFrames(buf: Uint8Array): { frames: ParsedFrame[]; remaining: Uint8
     let payload = buf.slice(offset + headerLen, offset + headerLen + payloadLen);
     if (masked) {
       const maskKey = buf.slice(offset + headerLen - 4, offset + headerLen);
-      payload = payload.map((b, i) => b ^ maskKey[i % 4]);
+      const unmasked = new Uint8Array(payloadLen);
+      for (let i = 0; i < payloadLen; i++) {
+        unmasked[i] = payload[i] ^ maskKey[i % 4];
+      }
+      payload = unmasked;
     }
 
-    frames.push({ opcode, payload });
+    frames.push({ fin, opcode, payload });
     offset += headerLen + payloadLen;
   }
 
@@ -115,7 +137,10 @@ async function synthesizeSpeech(text: string, voice: string, apiKey: string): Pr
   const taskId = crypto.randomUUID();
 
   // Connect via TLS to DashScope
-  const socket = connect(`${DASHSCOPE_HOST}:443`, { secureTransport: "on" });
+  const socket = connect(
+    { hostname: DASHSCOPE_HOST, port: 443 },
+    { secureTransport: "on", allowHalfOpen: false },
+  );
   const writer = socket.writable.getWriter();
   const reader = socket.readable.getReader();
 
@@ -135,17 +160,14 @@ async function synthesizeSpeech(text: string, voice: string, apiKey: string): Pr
     await writer.write(new TextEncoder().encode(upgradeReq));
 
     // Read HTTP upgrade response
-    let httpBuf = new Uint8Array(0);
-    let wsDataBuf = new Uint8Array(0);
+    let httpBuf: Uint8Array<ArrayBufferLike> = new Uint8Array(0);
+    let wsDataBuf: Uint8Array<ArrayBufferLike> = new Uint8Array(0);
 
     while (true) {
       const { value, done } = await reader.read();
       if (done) throw new Error("Connection closed during handshake");
 
-      const combined = new Uint8Array(httpBuf.length + value.length);
-      combined.set(httpBuf);
-      combined.set(value, httpBuf.length);
-      httpBuf = combined;
+      httpBuf = concatUint8Arrays(httpBuf, value);
 
       const headerEnd = new TextDecoder().decode(httpBuf).indexOf("\r\n\r\n");
       if (headerEnd >= 0) {
@@ -182,41 +204,76 @@ async function synthesizeSpeech(text: string, voice: string, apiKey: string): Pr
     });
 
     // Read WebSocket frames
-    const audioChunks: Uint8Array[] = [];
+    const audioChunks: Uint8Array<ArrayBufferLike>[] = [];
     const deadline = Date.now() + TIMEOUT_MS;
+    let fragmentedOpcode: number | null = null;
+    let fragmentedPayload: Uint8Array<ArrayBufferLike> = new Uint8Array(0);
+
+    const handleCompleteFrame = async (
+      opcode: number,
+      payload: Uint8Array<ArrayBufferLike>,
+    ): Promise<Uint8Array<ArrayBufferLike> | null> => {
+      if (opcode === 0x8) {
+        throw new Error("WebSocket closed by server");
+      }
+      if (opcode === 0x9 || opcode === 0xa) {
+        return null;
+      }
+      if (opcode === 0x2) {
+        audioChunks.push(payload);
+        return null;
+      }
+      if (opcode !== 0x1) {
+        return null;
+      }
+
+      const msg = JSON.parse(new TextDecoder().decode(payload)) as DashScopeMessage;
+      const err = extractError(msg);
+      if (err) throw new Error(err);
+      if (msg.header?.event === "task-finished") {
+        const merged = concatUint8Arrays(...audioChunks);
+        await writer.write(encodeCloseFrame());
+        return merged;
+      }
+      return null;
+    };
 
     while (Date.now() < deadline) {
       const { frames, remaining } = parseFrames(wsDataBuf);
       wsDataBuf = remaining;
 
       for (const frame of frames) {
-        if (frame.opcode === 0x8) {
-          throw new Error("WebSocket closed by server");
-        }
-        if (frame.opcode === 0x2) {
-          audioChunks.push(frame.payload);
-        }
-        if (frame.opcode === 0x1) {
-          const msg = JSON.parse(new TextDecoder().decode(frame.payload)) as DashScopeMessage;
-          const err = extractError(msg);
-          if (err) throw new Error(err);
-          if (msg.header?.event === "task-finished") {
-            const total = audioChunks.reduce((s, c) => s + c.byteLength, 0);
-            const merged = new Uint8Array(total);
-            let off = 0;
-            for (const c of audioChunks) { merged.set(c, off); off += c.byteLength; }
-            await writer.write(encodeCloseFrame());
-            return merged;
+        if (frame.opcode === 0x0) {
+          if (fragmentedOpcode === null) {
+            throw new Error("Unexpected WebSocket continuation frame");
           }
+          fragmentedPayload = concatUint8Arrays(fragmentedPayload, frame.payload);
+          if (frame.fin) {
+            const result = await handleCompleteFrame(fragmentedOpcode, fragmentedPayload);
+            fragmentedOpcode = null;
+            fragmentedPayload = new Uint8Array(0);
+            if (result) {
+              return result;
+            }
+          }
+          continue;
+        }
+
+        if (!frame.fin) {
+          fragmentedOpcode = frame.opcode;
+          fragmentedPayload = frame.payload;
+          continue;
+        }
+
+        const result = await handleCompleteFrame(frame.opcode, frame.payload);
+        if (result) {
+          return result;
         }
       }
 
       const { value, done } = await reader.read();
       if (done) break;
-      const combined = new Uint8Array(wsDataBuf.length + value.length);
-      combined.set(wsDataBuf);
-      combined.set(value, wsDataBuf.length);
-      wsDataBuf = combined;
+      wsDataBuf = concatUint8Arrays(wsDataBuf, value);
     }
 
     throw new Error("TTS timeout");
@@ -227,7 +284,7 @@ async function synthesizeSpeech(text: string, voice: string, apiKey: string): Pr
   }
 }
 
-export async function handleTTS(request: Request, env: Env, origin?: string | null): Promise<Response> {
+export async function handleTTS(request: Request, env: ValidatedEnv, origin?: string | null): Promise<Response> {
   if (request.method !== "POST") {
     return corsResponse(JSON.stringify({ error: "Method not allowed" }), 405, undefined, origin);
   }

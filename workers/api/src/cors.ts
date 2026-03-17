@@ -4,17 +4,26 @@ const ALLOWED_ORIGINS = [
   "http://localhost:5173",
 ];
 
-function getAllowedOrigin(requestOrigin: string | null): string {
-  if (requestOrigin && ALLOWED_ORIGINS.includes(requestOrigin)) return requestOrigin;
-  return ALLOWED_ORIGINS[0];
+function getAllowedOrigin(requestOrigin: string | null): string | null {
+  if (requestOrigin && ALLOWED_ORIGINS.includes(requestOrigin)) {
+    return requestOrigin;
+  }
+  return null;
 }
 
 export function corsHeaders(requestOrigin?: string | null): Record<string, string> {
-  return {
-    "Access-Control-Allow-Origin": getAllowedOrigin(requestOrigin ?? null),
+  const allowedOrigin = getAllowedOrigin(requestOrigin ?? null);
+  const headers: Record<string, string> = {
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Headers": "Content-Type, X-App-Token",
+    Vary: "Origin",
   };
+
+  if (allowedOrigin) {
+    headers["Access-Control-Allow-Origin"] = allowedOrigin;
+  }
+
+  return headers;
 }
 
 export function corsResponse(body: string | null, status = 200, extraHeaders?: Record<string, string>, requestOrigin?: string | null): Response {
@@ -25,5 +34,5 @@ export function corsResponse(body: string | null, status = 200, extraHeaders?: R
 }
 
 export function handleCORS(requestOrigin?: string | null): Response {
-  return new Response(null, { headers: corsHeaders(requestOrigin) });
+  return new Response(null, { status: 204, headers: corsHeaders(requestOrigin) });
 }

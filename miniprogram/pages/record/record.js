@@ -1,8 +1,8 @@
 const app = getApp();
 let recorderManager = null;
 
-// API backend URL — TODO: add /stepfun-asr route to Workers API
 const API_BASE = 'https://project-resonance-api.project-resonance.workers.dev';
+const APP_TOKEN = 'resonance-2026';
 
 Page({
   data: {
@@ -139,13 +139,13 @@ Page({
     retryCount = retryCount || 0;
     this.setData({ state: 'processing', statusText: retryCount > 0 ? `正在重试识别 (${retryCount}/2)...` : '正在识别语音...' });
 
-    console.log('[ASR] Uploading to:', `${API_BASE}/stepfun-asr`);
+    console.log('[ASR] Uploading to:', `${API_BASE}/dashscope-asr`);
 
     wx.uploadFile({
-      url: `${API_BASE}/stepfun-asr`,
+      url: `${API_BASE}/dashscope-asr`,
       filePath: filePath,
       name: 'file',
-      formData: { model: 'step-asr' },
+      header: { 'X-App-Token': APP_TOKEN },
       success: (res) => {
         console.log('[ASR] statusCode:', res.statusCode, 'data:', res.data);
         try {

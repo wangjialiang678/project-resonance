@@ -10,8 +10,17 @@ const Index = () => {
     isCloning,
     voiceId,
     setVoiceId,
+    cancelPendingClone,
     error: ttsError,
   } = useCosyVoiceTTS();
+
+  const cloneAndPersistVoiceId = async (audioBlob: Blob, referenceText?: string) => {
+    const nextVoiceId = await cloneVoice(audioBlob, referenceText);
+    if (nextVoiceId) {
+      setVoiceId(nextVoiceId);
+    }
+    return nextVoiceId;
+  };
 
   return (
     <UsagePage
@@ -21,7 +30,8 @@ const Index = () => {
       voiceId={voiceId}
       isCloning={isCloning}
       ttsError={ttsError}
-      onCloneVoice={cloneVoice}
+      onCloneVoice={cloneAndPersistVoiceId}
+      onCancelCloneResult={cancelPendingClone}
       onClearVoice={() => setVoiceId(null)}
     />
   );

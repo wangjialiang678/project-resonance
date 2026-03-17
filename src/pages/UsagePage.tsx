@@ -2,7 +2,7 @@ import { useState, useCallback, useMemo, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Mic, RotateCcw } from 'lucide-react';
 import { useAudioRecorder } from '@/hooks/useAudioRecorder';
-import { useStepfunASR } from '@/hooks/useStepfunASR';
+import { useDashscopeASR } from '@/hooks/useDashscopeASR';
 import { useWechatBridge, getWechatDebugInfo } from '@/hooks/useWechatBridge';
 import AudioRecorderButton from '@/components/AudioRecorderButton';
 import ASRStreamingResult from '@/components/ASRStreamingResult';
@@ -18,6 +18,7 @@ interface UsagePageProps {
   voiceId: string | null;
   isCloning: boolean;
   onCloneVoice: (audioBlob: Blob, referenceText?: string) => Promise<string | null>;
+  onCancelCloneResult: () => void;
   onClearVoice: () => void;
 }
 
@@ -31,6 +32,7 @@ export default function UsagePage({
   voiceId,
   isCloning,
   onCloneVoice,
+  onCancelCloneResult,
   onClearVoice,
 }: UsagePageProps) {
   const { isRecording, duration, startRecording, stopRecording, error: recError, audioLevel } = useAudioRecorder();
@@ -44,7 +46,7 @@ export default function UsagePage({
     error: asrError,
     transcribe,
     reset: resetASR,
-  } = useStepfunASR();
+  } = useDashscopeASR();
 
   // Handle transcript received from WeChat native recording
   useEffect(() => {
@@ -116,10 +118,17 @@ export default function UsagePage({
 
           console.log('[handleStop] CLONE triggered — sending', truncatedWav.size, 'bytes (truncated) with refText:', text);
 
-          const clonePromise = onCloneVoice(truncatedWav, text);
+          let cancelled = false;
+          const clonePromise = onCloneVoice(truncatedWav, text).then((vid) => (
+            cancelled ? null : vid
+          ));
           let timeoutId: ReturnType<typeof setTimeout>;
           const timeoutPromise = new Promise<null>((resolve) => {
-            timeoutId = setTimeout(() => resolve(null), 20000);
+            timeoutId = setTimeout(() => {
+              cancelled = true;
+              onCancelCloneResult();
+              resolve(null);
+            }, 20000);
           });
           const vid = await Promise.race([clonePromise, timeoutPromise]);
           clearTimeout(timeoutId!);
@@ -177,7 +186,7 @@ export default function UsagePage({
     }
 
     setFlowState('result');
-  }, [stopRecording, transcribe, onSpeak, voiceId, onCloneVoice]);
+  }, [stopRecording, transcribe, onSpeak, voiceId, onCloneVoice, onCancelCloneResult]);
 
   const handleReset = useCallback(() => {
     setFlowState('idle');

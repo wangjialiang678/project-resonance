@@ -4,7 +4,7 @@
  * Flow: FormData audio → OSS upload → pre-signed URL → CosyVoice clone API → voice_id
  */
 
-import type { Env } from "./env";
+import type { ValidatedEnv } from "./env";
 import { corsResponse } from "./cors";
 
 const COSYVOICE_CLONE_URL =
@@ -112,10 +112,12 @@ async function ossDelete(
 
 // --- Main handler ---
 
-export async function handleClone(request: Request, env: Env, origin?: string | null): Promise<Response> {
+export async function handleClone(request: Request, env: ValidatedEnv, origin?: string | null): Promise<Response> {
   if (request.method !== "POST") {
     return corsResponse(JSON.stringify({ error: "Method not allowed" }), 405, undefined, origin);
   }
+
+  let uploadedObjectKey: string | null = null;
 
   try {
     const contentType = request.headers.get("content-type") || "";
@@ -159,6 +161,7 @@ export async function handleClone(request: Request, env: Env, origin?: string | 
       console.error("[clone] OSS upload failed:", uploadResult.error);
       return corsResponse(JSON.stringify({ error: "音频上传失败", detail: uploadResult.error }), 500, undefined, origin);
     }
+    uploadedObjectKey = objectKey;
 
     // Step 2: Pre-signed URL
     const publicUrl = await ossPresignUrl(
@@ -187,7 +190,15 @@ export async function handleClone(request: Request, env: Env, origin?: string | 
       }),
     });
 
-    const cloneResult: Record<string, unknown> = await cloneResp.json();
+    const rawCloneResult = await cloneResp.text();
+    let cloneResult: Record<string, unknown> = {};
+    try {
+      cloneResult = rawCloneResult
+        ? JSON.parse(rawCloneResult) as Record<string, unknown>
+        : {};
+    } catch {
+      cloneResult = { error: rawCloneResult || "Invalid upstream response" };
+    }
 
     if (!cloneResp.ok || cloneResult.code) {
       const errMsg = (cloneResult.message || cloneResult.code || "Clone API error") as string;
@@ -201,17 +212,24 @@ export async function handleClone(request: Request, env: Env, origin?: string | 
       return corsResponse(JSON.stringify({ error: "未获取到音色 ID", detail: JSON.stringify(cloneResult) }), 500, undefined, origin);
     }
 
-    // Step 4: Cleanup
-    try {
-      await ossDelete(env.OSS_BUCKET, env.OSS_ENDPOINT, env.OSS_ACCESS_KEY_ID, env.OSS_ACCESS_KEY_SECRET, objectKey);
-    } catch {
-      console.warn("[clone] OSS cleanup failed (non-critical)");
-    }
-
     console.log("[clone] SUCCESS:", voiceId);
     return corsResponse(JSON.stringify({ voice_id: voiceId }), 200, undefined, origin);
   } catch (err) {
     console.error("[clone] Error:", err);
     return corsResponse(JSON.stringify({ error: err instanceof Error ? err.message : "Unknown error" }), 500, undefined, origin);
+  } finally {
+    if (uploadedObjectKey) {
+      try {
+        await ossDelete(
+          env.OSS_BUCKET,
+          env.OSS_ENDPOINT,
+          env.OSS_ACCESS_KEY_ID,
+          env.OSS_ACCESS_KEY_SECRET,
+          uploadedObjectKey,
+        );
+      } catch (err) {
+        console.warn("[clone] OSS cleanup threw:", err);
+      }
+    }
   }
 }
