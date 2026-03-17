@@ -1,4 +1,4 @@
-import { useStepfunTTS } from '@/hooks/useStepfunTTS';
+import { useCosyVoiceTTS } from '@/hooks/useCosyVoiceTTS';
 import UsagePage from './UsagePage';
 
 const Index = () => {
@@ -11,7 +11,7 @@ const Index = () => {
     voiceId,
     setVoiceId,
     error: ttsError,
-  } = useStepfunTTS();
+  } = useCosyVoiceTTS();
 
   return (
     <UsagePage
