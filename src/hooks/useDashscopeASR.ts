@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { formatApiError } from '@/utils/apiErrors';
+import { formatApiError, formatFetchError } from '@/utils/apiErrors';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 const APP_TOKEN = import.meta.env.VITE_APP_TOKEN || 'resonance-2026';
@@ -29,7 +29,12 @@ export function useDashscopeASR(): UseDashscopeASRReturn {
 
     try {
       const formData = new FormData();
-      formData.append('file', audioBlob, 'recording.webm');
+      // Use correct file extension based on actual blob MIME type
+      const ext = audioBlob.type.includes('mp4') ? 'mp4'
+                : audioBlob.type.includes('aac') ? 'aac'
+                : audioBlob.type.includes('ogg') ? 'ogg'
+                : 'webm';
+      formData.append('file', audioBlob, `recording.${ext}`);
       const response = await fetch(`${API_BASE}/dashscope-asr`, {
         method: 'POST',
         headers: {
@@ -55,7 +60,8 @@ export function useDashscopeASR(): UseDashscopeASRReturn {
       setIsProcessing(false);
       return text || null;
     } catch (err) {
-      const message = err instanceof Error ? err.message : '识别失败';
+      const raw = err instanceof Error ? err.message : '识别失败';
+      const message = formatFetchError(raw);
       setError(message);
       setIsProcessing(false);
       return null;

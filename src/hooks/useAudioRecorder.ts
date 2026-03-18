@@ -37,6 +37,7 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animFrameRef = useRef<number | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const mimeTypeRef = useRef<string>('audio/webm');
 
   const stopLevelMonitoring = useCallback(() => {
     if (animFrameRef.current) {
@@ -77,13 +78,26 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
       });
       streamRef.current = stream;
 
-      const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-          ? 'audio/webm;codecs=opus'
-          : 'audio/webm',
-        // Lower bitrate = smaller upload payload for faster ASR
-        audioBitsPerSecond: 24000,
-      });
+      // Detect best supported audio MIME type (webm on Chrome/Android, mp4 on iOS Safari)
+      const mimeType = (() => {
+        const candidates = [
+          'audio/webm;codecs=opus',
+          'audio/webm',
+          'audio/mp4',
+          'audio/aac',
+          'audio/ogg;codecs=opus',
+        ];
+        for (const mime of candidates) {
+          if (MediaRecorder.isTypeSupported(mime)) return mime;
+        }
+        return '';
+      })();
+      mimeTypeRef.current = mimeType || 'audio/webm';
+      console.log('[recorder] selected mimeType:', mimeTypeRef.current);
+
+      const recorderOptions: MediaRecorderOptions = { audioBitsPerSecond: 24000 };
+      if (mimeType) recorderOptions.mimeType = mimeType;
+      const mediaRecorder = new MediaRecorder(stream, recorderOptions);
       mediaRecorderRef.current = mediaRecorder;
       chunksRef.current = [];
 
@@ -157,7 +171,7 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
 
       recorder.onstop = async () => {
         const finalDuration = (Date.now() - startTimeRef.current) / 1000;
-        const webmBlob = new Blob(chunksRef.current, { type: 'audio/webm' });
+        const webmBlob = new Blob(chunksRef.current, { type: mimeTypeRef.current });
 
         if (intervalRef.current) clearInterval(intervalRef.current);
         stopLevelMonitoring();

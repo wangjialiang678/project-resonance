@@ -24,6 +24,15 @@ function extractErrorDetail(errData: Record<string, unknown>): string | undefine
   return undefined;
 }
 
+/** Map browser-native fetch error messages to Chinese */
+export function formatFetchError(message: string): string {
+  // Safari: "Load failed", Chrome: "Failed to fetch", Firefox: "NetworkError..."
+  if (message === 'Load failed' || message === 'Failed to fetch' || message.includes('NetworkError')) {
+    return '网络连接失败，请检查网络后重试';
+  }
+  return message;
+}
+
 export function formatApiError(
   status: number,
   errData: Record<string, unknown>,
