@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>共鸣 - 设备诊断</title>
+<style>
+  body { font-family: -apple-system, sans-serif; max-width: 600px; margin: 20px auto; padding: 0 16px; background: #faf9f6; }
+  h1 { color: #e67e22; font-size: 20px; }
+  .card { background: white; border-radius: 12px; padding: 16px; margin: 12px 0; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+  .ok { color: #27ae60; } .fail { color: #e74c3c; } .warn { color: #f39c12; }
+  .label { font-weight: 600; display: inline-block; min-width: 140px; }
+  pre { font-size: 12px; background: #f5f5f5; padding: 8px; border-radius: 6px; overflow-x: auto; white-space: pre-wrap; }
+  button { background: #e67e22; color: white; border: none; padding: 12px 24px; border-radius: 8px; font-size: 16px; margin: 8px 4px; cursor: pointer; }
+  button:disabled { opacity: 0.5; }
+  #log { font-size: 13px; line-height: 1.6; }
+</style>
+</head>
+<body>
+<h1>共鸣 设备诊断</h1>
+
+<div class="card" id="info"></div>
+<div class="card" id="mime"></div>
+<div class="card">
+  <b>录音测试</b><br>
+  <button id="btnRec" onclick="testRecord()">开始录音 (3秒)</button>
+  <button id="btnASR" disabled onclick="testASR()">测试语音识别</button>
+  <div id="recResult"></div>
+</div>
+<div class="card">
+  <b>网络测试</b><br>
+  <button onclick="testNetwork()">测试 Workers API</button>
+  <div id="netResult"></div>
+</div>
+<div class="card">
+  <b>日志</b>
+  <pre id="log"></pre>
+</div>
+
+<script>
+const API = 'https://project-resonance-api.project-resonance.workers.dev';
+const TOKEN = 'resonance-2026';
+let recordedBlob = null;
+
+function log(msg) {
+  const el = document.getElementById('log');
+  el.textContent += new Date().toLocaleTimeString() + ' ' + msg + '\n';
+  el.scrollTop = el.scrollHeight;
+}
+
+// Device info
+(function checkDevice() {
+  const el = document.getElementById('info');
+  const ua = navigator.userAgent;
+  const isIOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const isSafari = /Safari/.test(ua) && !/Chrome/.test(ua);
+  const hasGUM = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+  const hasMR = typeof MediaRecorder !== 'undefined';
+
+  el.innerHTML = `
+    <b>设备信息</b><br>
+    <span class="label">UA:</span> <small>${ua}</small><br>
+    <span class="label">iOS:</span> <span class="${isIOS ? 'warn' : 'ok'}">${isIOS}</span><br>
+    <span class="label">Safari:</span> <span class="${isSafari ? 'warn' : 'ok'}">${isSafari}</span><br>
+    <span class="label">getUserMedia:</span> <span class="${hasGUM ? 'ok' : 'fail'}">${hasGUM}</span><br>
+    <span class="label">MediaRecorder:</span> <span class="${hasMR ? 'ok' : 'fail'}">${hasMR}</span><br>
+  `;
+  log('Device: iOS=' + isIOS + ' Safari=' + isSafari + ' GUM=' + hasGUM + ' MR=' + hasMR);
+})();
+
+// MIME type support
+(function checkMime() {
+  const el = document.getElementById('mime');
+  if (typeof MediaRecorder === 'undefined') {
+    el.innerHTML = '<b>MIME 支持</b><br><span class="fail">MediaRecorder 不可用</span>';
+    return;
+  }
+  const types = [
+    'audio/webm;codecs=opus', 'audio/webm',
+    'audio/mp4', 'audio/mp4;codecs=mp4a.40.2',
+    'audio/aac', 'audio/ogg;codecs=opus',
+    'video/webm', 'video/mp4',
+  ];
+  let html = '<b>MIME 类型支持</b><br>';
+  let supported = [];
+  for (const t of types) {
+    const ok = MediaRecorder.isTypeSupported(t);
+    html += `<span class="label">${t}</span> <span class="${ok ? 'ok' : 'fail'}">${ok ? 'YES' : 'NO'}</span><br>`;
+    if (ok) supported.push(t);
+  }
+  el.innerHTML = html;
+  log('Supported MIME: ' + (supported.length ? supported.join(', ') : 'NONE (will use browser default)'));
+})();
+
+// Record test
+async function testRecord() {
+  const btn = document.getElementById('btnRec');
+  const res = document.getElementById('recResult');
+  btn.disabled = true;
+  btn.textContent = '录音中...';
+  res.innerHTML = '';
+  log('Starting 3s recording test...');
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: { channelCount: 1, sampleRate: 16000, echoCancellation: true, noiseSuppression: true }
+    });
+    log('getUserMedia OK, tracks: ' + stream.getAudioTracks().length);
+
+    // Detect MIME
+    const candidates = ['audio/webm;codecs=opus','audio/webm','audio/mp4','audio/aac','audio/ogg;codecs=opus'];
+    let mimeType = '';
+    for (const m of candidates) {
+      if (MediaRecorder.isTypeSupported(m)) { mimeType = m; break; }
+    }
+    log('Selected MIME: ' + (mimeType || '(browser default)'));
+
+    const opts = { audioBitsPerSecond: 24000 };
+    if (mimeType) opts.mimeType = mimeType;
+
+    const recorder = new MediaRecorder(stream, opts);
+    const chunks = [];
+    recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+
+    recorder.onerror = e => {
+      log('MediaRecorder ERROR: ' + e.error?.message);
+      res.innerHTML = '<span class="fail">录音错误: ' + (e.error?.message || 'unknown') + '</span>';
+    };
+
+    recorder.start(250);
+    log('MediaRecorder started, state=' + recorder.state + ', mimeType=' + recorder.mimeType);
+
+    await new Promise(r => setTimeout(r, 3000));
+
+    recorder.stop();
+    stream.getTracks().forEach(t => t.stop());
+
+    await new Promise(r => { recorder.onstop = r; });
+
+    const actualMime = recorder.mimeType || mimeType || 'audio/webm';
+    recordedBlob = new Blob(chunks, { type: actualMime });
+    log('Recording done: ' + chunks.length + ' chunks, blob size=' + recordedBlob.size + ', type=' + recordedBlob.type);
+
+    res.innerHTML = `
+      <span class="${recordedBlob.size > 0 ? 'ok' : 'fail'}">
+        Blob: ${recordedBlob.size} bytes, type: ${recordedBlob.type}, chunks: ${chunks.length}
+      </span>
+    `;
+    document.getElementById('btnASR').disabled = false;
+  } catch (err) {
+    log('Recording FAILED: ' + err.message);
+    res.innerHTML = '<span class="fail">失败: ' + err.message + '</span>';
+  }
+  btn.disabled = false;
+  btn.textContent = '开始录音 (3秒)';
+}
+
+// ASR test
+async function testASR() {
+  if (!recordedBlob) return;
+  const res = document.getElementById('recResult');
+  log('Testing ASR, blob size=' + recordedBlob.size + ', type=' + recordedBlob.type);
+
+  try {
+    const ext = recordedBlob.type.includes('mp4') ? 'mp4'
+              : recordedBlob.type.includes('aac') ? 'aac'
+              : recordedBlob.type.includes('ogg') ? 'ogg' : 'webm';
+    const fd = new FormData();
+    fd.append('file', recordedBlob, 'recording.' + ext);
+
+    const t0 = Date.now();
+    const resp = await fetch(API + '/dashscope-asr', {
+      method: 'POST',
+      headers: { 'X-App-Token': TOKEN },
+      body: fd,
+    });
+    const elapsed = Date.now() - t0;
+    const data = await resp.json();
+    log('ASR response: status=' + resp.status + ', elapsed=' + elapsed + 'ms, data=' + JSON.stringify(data));
+
+    res.innerHTML += `<br><span class="${resp.ok ? 'ok' : 'fail'}">
+      ASR ${resp.status}: "${data.text || data.error || JSON.stringify(data)}" (${elapsed}ms)
+    </span>`;
+  } catch (err) {
+    log('ASR FAILED: ' + err.message);
+    res.innerHTML += '<br><span class="fail">ASR 失败: ' + err.message + '</span>';
+  }
+}
+
+// Network test
+async function testNetwork() {
+  const res = document.getElementById('netResult');
+  res.innerHTML = '测试中...';
+  log('Testing network to Workers API...');
+
+  try {
+    // Test OPTIONS (CORS preflight)
+    const t0 = Date.now();
+    const resp = await fetch(API + '/dashscope-asr', {
+      method: 'OPTIONS',
+    });
+    const elapsed = Date.now() - t0;
+    log('OPTIONS: status=' + resp.status + ', elapsed=' + elapsed + 'ms');
+
+    // Test POST with wrong content type (should get 400, not network error)
+    const t1 = Date.now();
+    const resp2 = await fetch(API + '/dashscope-asr', {
+      method: 'POST',
+      headers: { 'X-App-Token': TOKEN, 'Content-Type': 'application/json' },
+      body: '{}',
+    });
+    const elapsed2 = Date.now() - t1;
+    const data2 = await resp2.json();
+    log('POST test: status=' + resp2.status + ', elapsed=' + elapsed2 + 'ms, body=' + JSON.stringify(data2));
+
+    res.innerHTML = `
+      <span class="ok">OPTIONS: ${resp.status} (${elapsed}ms)</span><br>
+      <span class="${resp2.status === 400 ? 'ok' : 'fail'}">POST: ${resp2.status} (${elapsed2}ms) ${JSON.stringify(data2)}</span>
+    `;
+  } catch (err) {
+    log('Network FAILED: ' + err.message);
+    res.innerHTML = '<span class="fail">网络失败: ' + err.message + '</span>';
+  }
+}
+</script>
+</body>
+</html>

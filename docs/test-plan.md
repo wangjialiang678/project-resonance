@@ -1,122 +1,136 @@
-# Project Resonance 闭环测试方案
+# Project Resonance 测试方案
 
-生成时间: 2026-03-17
-项目状态: Supabase → Cloudflare Workers 迁移完成，auth 层移除
-前端验证工具: Playwright (Python)
-
----
-
-## P0: 基础健康检查
-
-- [ ] **P0-1: 依赖安装**
-  判定标准: `bun install` 退出码=0，无 error
-  建议命令: `cd project-root && bun install`
-
-- [ ] **P0-2: 构建成功**
-  判定标准: `bun run build` 退出码=0，`dist/` 目录生成
-  建议命令: `bun run build`
-
-- [ ] **P0-3: Dev Server 启动**
-  判定标准: `http://localhost:8080` 返回 HTTP 200
-  建议命令: `bun run dev &` → `curl -s -o /dev/null -w "%{http_code}" http://localhost:8080`
-
-- [ ] **P0-4: Workers API 可达**
-  判定标准: `POST /cosyvoice-tts` 返回 HTTP 200 + 音频数据 >1KB
-  建议命令: `curl -s -X POST $API_URL/cosyvoice-tts -H "Content-Type: application/json" -H "X-App-Token: $APP_TOKEN" -d '{"text":"你好"}' -o /tmp/test.mp3 && ls -la /tmp/test.mp3`
-
-- [ ] **P0-5: Lint 通过**
-  判定标准: `bun run lint` 退出码=0
-  建议命令: `bun run lint`
+更新: 2026-03-19
+架构: Cloudflare Pages + Pages Functions (同域名)
+前端验证: Playwright (Python) + curl
 
 ---
 
-## P1: 核心功能验证
+## 三层测试体系
 
-### 功能 1: TTS 播报完整链路
+| 层级 | 名称 | 何时跑 | 耗时 | 脚本 |
+|------|------|--------|------|------|
+| **Layer 0** | Smoke Test | **每次部署后必跑** | ~30s | `tests/smoke.sh` |
+| **Layer 1** | 功能回归 | 每次改代码后跑 | ~2min | `tests/regression.py` |
+| **Layer 2** | 全量验证 | 发版/大改前跑 | ~5min | Layer 0 + Layer 1 + 手动 |
 
-- [ ] **P1-1a [后端]** TTS API 返回有效音频
-  判定标准: POST /cosyvoice-tts `{"text":"今天天气真不错"}` → HTTP 200, Content-Type=audio/mpeg, body >5KB
-  建议命令: curl + `X-App-Token` header，检查 response headers 和 body size
+### 规则
 
-- [ ] **P1-1b [前端]** 页面加载 → 使用页正常渲染
-  判定标准: 访问 `http://localhost:8080` → 页面包含"共鸣"标题文字，无 JS 错误
-  建议工具: Playwright → navigate → 检查页面内容 + console errors
-
-- [ ] **P1-1c [端到端]** TTS 按钮触发播报
-  判定标准: 设置页面有 TTS 相关控件可见，TTS API 网络请求成功发出
-  建议工具: Playwright → 导航到设置页 → 检查 TTS 相关 UI 元素存在
-
-### 功能 2: Voice Clone 链路
-
-- [ ] **P1-2a [后端]** Clone API 接受音频上传
-  判定标准: POST /cosyvoice-voice-clone (FormData with WAV) → HTTP 200, 返回 JSON 含 voice_id
-  建议命令: curl -H "X-App-Token: $APP_TOKEN" -F "audio=@fixtures/test-5s.wav" $API_URL/cosyvoice-voice-clone
-
-- [ ] **P1-2b [后端]** Clone 后的 voice_id 可用于 TTS
-  判定标准: POST /cosyvoice-tts `{"text":"测试","voice":"<cloned_id>"}` → HTTP 200, 音频 >5KB
-  建议命令: curl + `X-App-Token` (用 P1-2a 返回的 voice_id)
-
-- [ ] **P1-2c [前端]** VoiceClonePanel UI 可见且可交互
-  判定标准: 设置页 → 声音克隆面板可见，包含录音/上传按钮
-  建议工具: Playwright → navigate /settings → 查找克隆面板元素
-
-### 功能 3: 四页面导航与渲染
-
-- [ ] **P1-3a [前端]** 使用页 (/) 正常渲染
-  判定标准: 页面加载无 JS 错误，包含录音相关 UI 元素
-  建议工具: Playwright
-
-- [ ] **P1-3b [前端]** 设置页 (/settings) 正常渲染
-  判定标准: 页面包含"设置"相关文字，ASR/TTS 配置区域可见
-  建议工具: Playwright
-
-- [ ] **P1-3c [前端]** 训练页 (/training) 正常渲染
-  判定标准: 页面包含短语列表，训练进度可见
-  建议工具: Playwright
-
-- [ ] **P1-3d [前端]** 短语页 (/phrases) 正常渲染
-  判定标准: 页面包含短语管理 UI，预设短语已加载
-  建议工具: Playwright
-
-- [ ] **P1-3e [前端]** 页面间导航正常
-  判定标准: 从使用页 → 设置页 → 使用页，每次切换后页面正确渲染
-  建议工具: Playwright → click nav tabs → verify content
-
-### 功能 4: localStorage 离线数据持久化
-
-- [ ] **P1-4a [前端]** 短语数据持久化
-  判定标准: 添加自定义短语 → 刷新页面 → 自定义短语仍存在（检查 localStorage key `resonance_phrases`）
-  建议工具: Playwright → evaluate JS → add phrase → reload → verify
-
-- [ ] **P1-4b [前端]** 设置数据持久化
-  判定标准: 修改设置 → 刷新页面 → 设置值保持（检查 localStorage key `resonance_settings`）
-  建议工具: Playwright → evaluate JS → change setting → reload → verify
-
-- [ ] **P1-4c [前端]** Voice ID 持久化
-  判定标准: localStorage `resonance_cosyvoice_voice_id` 写入后，刷新页面仍存在
-  建议工具: Playwright → evaluate JS
-
-### 功能 5: 首次引导流程
-
-- [ ] **P1-5a [前端]** 清空 onboarding 状态后显示欢迎页
-  判定标准: 删除 `resonance_onboarding_done` → 刷新 → 欢迎页出现
-  建议工具: Playwright → clear localStorage → reload → check welcome content
+- **Layer 0 是硬门槛**：部署后 smoke test 不过，不给用户 URL
+- **Layer 1 测 localhost 和线上**：改完代码先跑 localhost，部署后再跑线上
+- **每完成 3 个改动后**：重跑 Layer 1 全部（回归检查）
 
 ---
 
-## 手动测试（硬件依赖，不纳入自动化）
+## Layer 0: Smoke Test
 
-- [ ] **M1** 麦克风录音 → ASR 识别 → 文字结果
-  原因: 需要真实麦克风输入
-  注: 后端 ASR 链路为 DashScope + Workers，由服务端密钥驱动
+`tests/smoke.sh [URL]`
 
-- [ ] **M2** 录音 → 自动触发 Voice Clone → 克隆音色 TTS
-  原因: 需要真实麦克风 + 5秒以上语音
+默认测 https://project-resonance.pages.dev ，也可传入 localhost 或 preview URL。
+
+| ID | 检查项 | 判定标准 |
+|----|--------|----------|
+| S0-1 | 前端页面加载 | GET / → HTTP 200 |
+| S0-2 | 页面包含应用内容 | HTML 含 "共鸣" 或 "语音识别" |
+| S0-3 | JS 资源可加载 | GET /assets/*.js → HTTP 200 |
+| S1-1 | ASR API 响应 | POST /dashscope-asr → HTTP 200 |
+| S1-2 | ASR 返回文本 | 响应含 "text" 字段 |
+| S2-1 | TTS API 响应 | POST /cosyvoice-tts → HTTP 200 |
+| S2-2 | TTS 返回音频 | 响应体 > 1KB |
+| S3-1 | 无 Token 被拒 | POST without X-App-Token → 403 |
+| S3-2 | CORS 预检 | OPTIONS → 204 |
 
 ---
+
+## Layer 1: 功能回归
+
+`python tests/regression.py [URL]`
+
+默认测 http://localhost:8080 ，也可传入线上 URL。
+
+| ID | 检查项 | 判定标准 | 类型 |
+|----|--------|----------|------|
+| **R1 前端加载** | | | |
+| R1-1 | 前端返回 200 | Playwright navigate → 200 | 前端 |
+| R1-2 | 页面有应用内容 | body 包含 "共鸣" / "语音识别" / "欢迎" | 前端 |
+| R1-3 | 无 JS console error | console error 计数 = 0 | 前端 |
+| **R2 页面导航** | | | |
+| R2-1 | 使用页 (/) | 包含 "语音识别" 或 "录音" | 前端 |
+| R2-2 | 设置页 (/settings) | 包含 "设置" 或 "声音" | 前端 |
+| R2-3 | 训练页 (/training) | 包含 "训练" 或 "短语" | 前端 |
+| R2-4 | 短语页 (/phrases) | 包含 "短语" 或 "管理" | 前端 |
+| R2-5 | 页面间导航 | / → /settings 正常切换 | 前端 |
+| **R3 引导页** | | | |
+| R3-1 | 显示欢迎页 | 清空 onboarding → 出现 "欢迎" | 前端 |
+| R3-2 | 无训练步骤 | 不含 "录音训练" | 前端 |
+| R3-3 | 最后按钮 | 第3步显示 "开始使用" | 前端 |
+| R3-4 | 完成后导航 | 点击后跳转到 / | 前端 |
+| **R4 数据持久化** | | | |
+| R4-1 | 短语持久化 | 写入 → 刷新 → 仍存在 | 前端 |
+| R4-2 | Voice ID 持久化 | 写入 → 刷新 → 仍存在 | 前端 |
+| **R5 API 健康** | | | |
+| R5-1 | ASR API 200 | POST /dashscope-asr → 200 | 后端 |
+| R5-2 | ASR 返回 text | 响应含 text 字段 | 后端 |
+| R5-3 | TTS API 200 | POST /cosyvoice-tts → 200 | 后端 |
+| R5-4 | TTS 返回音频 | 响应 > 1KB | 后端 |
+| **R6 Auth & 安全** | | | |
+| R6-1 | 无 Token 被拒 | 403 | 后端 |
+| R6-2 | 无 StepFun 引用 | 设置页无 "阶跃" / "stepfun" | 前端 |
+| R6-3 | 无 API Key 泄漏 | dist/ 中无 STEPFUN_API_KEY | 安全 |
+
+---
+
+## Layer 2: 全量验证（发版前）
+
+在 Layer 0 + Layer 1 基础上，额外执行：
+
+### 手动测试（硬件依赖）
+
+| ID | 检查项 | 方法 |
+|----|--------|------|
+| M1 | 麦克风录音 → ASR → 文字 | 真机浏览器录音 |
+| M2 | 录音 ≥5s → 自动 Voice Clone | 首次使用流程 |
+| M3 | Clone 后 TTS 播报 | 使用克隆音色 |
+
+### 跨设备验证
+
+| ID | 环境 | 检查 |
+|----|------|------|
+| D1 | Chrome 桌面 | 全流程 |
+| D2 | Android 手机浏览器 | 录音 + ASR |
+| D3 | iOS Safari | 录音 + ASR |
+| D4 | 微信内置浏览器 | 页面加载 + 基本交互 |
+
+---
+
+## 常用命令
+
+```bash
+# Layer 0: 部署后 smoke test
+./tests/smoke.sh                                          # 测线上
+./tests/smoke.sh http://localhost:8080                    # 测本地
+
+# Layer 1: 功能回归（需要先 pip install playwright && playwright install chromium）
+python tests/regression.py                                 # 测 localhost
+python tests/regression.py https://project-resonance.pages.dev  # 测线上
+
+# P0: 构建检查
+npm install --legacy-peer-deps && npx vite build && npx vite preview --port 8080
+```
+
+---
+
+## 失败处理（同 CLAUDE.md 闭环规则）
+
+| 条件 | 响应 |
+|------|------|
+| 单项失败 ≥ 5 次 | 停止该项，报告所有尝试 |
+| 振荡（修 A 破 B ≥ 2 次） | 停止，报告架构问题 |
+| 总修复次数 ≥ 15 次 | 停止，生成完整失败报告 |
 
 ## 测试 Fixture
 
 | 文件 | 用途 | 规格 |
 |------|------|------|
 | `fixtures/test-5s.wav` | Voice Clone 测试 | 16kHz mono WAV, ~5秒, 含语音 |
+| (自动生成) | ASR smoke test | 1秒静音 WAV, 由脚本生成 |
